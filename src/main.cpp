@@ -17,13 +17,14 @@
 #include "program/errors.h"
 #include "program/exit.h"
 #include "program/parachute.h"
+#include "reflection/complete.h"
 #include "utils/archive.h"
 #include "utils/dynamic_storage.h"
 #include "utils/finally.h"
 #include "utils/macro.h"
 #include "utils/mat.h"
 #include "utils/memory_file.h"
-#include "reflection/complete.h"
+#include "utils/resource_allocator.h"
 #include "utils/strings.h"
 
 #define main SDL_main
@@ -31,6 +32,8 @@
 Program::Parachute error_parachute;
 Interface::Window win("Alpha", vec(800, 600));
 Graphics::Image img("test.png");
+Graphics::Texture tex;
+Graphics::TextureUnit tex_unit = Graphics::TextureUnit(tex).Interpolation(Graphics::linear).SetData(img);
 
 struct Attribs
 {
@@ -46,6 +49,7 @@ struct Uniforms
     Reflect(Uniforms)
     (
         (Graphics::Shader::VertUniform<fmat4>)(matrix),
+        (Graphics::Shader::FragUniform<Graphics::TextureUnit>)(tex),
     )
 };
 
@@ -64,7 +68,7 @@ varying vec3 v_color;
 
 void main()
 {
-    gl_FragColor = vec4(v_color, 1);
+    gl_FragColor = vec4(v_color,1) * 0.001 + texture2D(u_tex, vec2(0,1) + vec2(1,-1) * gl_FragCoord.xy / vec2(800,600));
 })");
 
 struct A
@@ -97,7 +101,9 @@ int main(int, char**)
         {fvec2(0,1), fvec3(1,0,1)},
     };
 
+
     shader_main.Bind();
+    uni.tex = tex_unit;
 
     buf.SetData(3, array);
 

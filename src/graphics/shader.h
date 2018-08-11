@@ -50,7 +50,7 @@ namespace Graphics::Shader
 
             return ret;
         }
-        else if constexpr (std::is_same_v<T, Texture     >) return "sampler2D";
+        else if constexpr (std::is_same_v<T, TextureUnit >) return "sampler2D";
         else if constexpr (std::is_same_v<T, bool        >) return "bool";
         else if constexpr (std::is_same_v<T, float       >) return "float";
         else if constexpr (std::is_same_v<T, double      >) return "double";
@@ -352,7 +352,7 @@ namespace Graphics::Shader
 
         inline static constexpr bool
             is_array   = std::is_array_v<type>,
-            is_texture = std::is_same_v<elem_type, Texture>,
+            is_texture = std::is_same_v<elem_type, TextureUnit>,
             is_bool    = std::is_same_v<Math::vec_base_t<elem_type>, bool>;
 
         inline static constexpr int array_elements = std::extent_v<std::conditional_t<is_array, type, type[1]>>;
@@ -372,7 +372,7 @@ namespace Graphics::Shader
 
             Program::BindHandle(handle);
 
-            if constexpr (is_texture) glUniform1i(location, object.Slot());
+            if constexpr (is_texture) glUniform1i(location, object.Index());
             else if constexpr (std::is_same_v<effective_elem_type, float       >) glUniform1f (location, object);
             else if constexpr (std::is_same_v<effective_elem_type, fvec2       >) glUniform2f (location, object.x, object.y);
             else if constexpr (std::is_same_v<effective_elem_type, fvec3       >) glUniform3f (location, object.x, object.y, object.z);

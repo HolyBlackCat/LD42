@@ -2,12 +2,12 @@
 <CodeBlocks_project_file>
 	<FileVersion major="1" minor="6" />
 	<Project>
-		<Option title="imp-re" />
+		<Option title="LD42" />
 		<Option pch_mode="2" />
 		<Option compiler="gcc" />
 		<Build>
 			<Target title="Debug">
-				<Option output="bin/imp-re" prefix_auto="1" extension_auto="1" />
+				<Option output="bin/LD42" prefix_auto="1" extension_auto="1" />
 				<Option working_dir="bin/" />
 				<Option object_output="obj/" />
 				<Option type="1" />
@@ -19,7 +19,7 @@
 				</Compiler>
 			</Target>
 			<Target title="Release">
-				<Option output="bin/imp-re" prefix_auto="1" extension_auto="1" />
+				<Option output="bin/LD42" prefix_auto="1" extension_auto="1" />
 				<Option working_dir="bin/" />
 				<Option object_output="obj/" />
 				<Option type="0" />
@@ -33,6 +33,18 @@
 					<Add option="-flto" />
 					<Add option="-s" />
 				</Linker>
+			</Target>
+			<Target title="Debug (OpenGL logs)">
+				<Option output="bin/LD42" prefix_auto="1" extension_auto="1" />
+				<Option working_dir="bin/" />
+				<Option object_output="obj/" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Compiler>
+					<Add option="-D_GLIBCXX_DEBUG" />
+					<Add option="-g" />
+					<Add option="-DGLFL_ENABLE_PROXY" />
+				</Compiler>
 			</Target>
 		</Build>
 		<Compiler>
@@ -68,15 +80,27 @@
 		<Unit filename="lib/implementation.cpp">
 			<Option compiler="gcc" use="1" buildCommand="$compiler $options $includes -c $file -o $object -g0 -O3" />
 		</Unit>
+		<Unit filename="src/graphics/blending.h" />
+		<Unit filename="src/graphics/clear.h" />
+		<Unit filename="src/graphics/complete.h" />
+		<Unit filename="src/graphics/framebuffer.h" />
 		<Unit filename="src/graphics/image.h" />
 		<Unit filename="src/graphics/shader.h" />
 		<Unit filename="src/graphics/texture.h" />
+		<Unit filename="src/graphics/vertex_buffer.h" />
+		<Unit filename="src/graphics/viewport.h" />
 		<Unit filename="src/interface/input.h" />
 		<Unit filename="src/interface/messagebox.cpp" />
 		<Unit filename="src/interface/messagebox.h" />
 		<Unit filename="src/interface/window.cpp" />
 		<Unit filename="src/interface/window.h" />
-		<Unit filename="src/main.cpp" />
+		<Unit filename="src/main.cpp">
+			<Option weight="80" />
+		</Unit>
+		<Unit filename="src/master.h">
+			<Option compile="1" />
+			<Option weight="20" />
+		</Unit>
 		<Unit filename="src/program/errors.h" />
 		<Unit filename="src/program/exit.h" />
 		<Unit filename="src/program/parachute.h" />
@@ -85,15 +109,19 @@
 		<Unit filename="src/reflection/interface.h" />
 		<Unit filename="src/reflection/primitives_arithmetic.h" />
 		<Unit filename="src/reflection/structures_macro.h" />
+		<Unit filename="src/reflection/structures_vec_mat.h" />
 		<Unit filename="src/utils/_common.h" />
 		<Unit filename="src/utils/archive.cpp" />
 		<Unit filename="src/utils/archive.h" />
+		<Unit filename="src/utils/clock.h" />
 		<Unit filename="src/utils/dynamic_storage.h" />
 		<Unit filename="src/utils/finally.h" />
 		<Unit filename="src/utils/macro.h" />
 		<Unit filename="src/utils/mat.h" />
 		<Unit filename="src/utils/memory_file.h" />
 		<Unit filename="src/utils/meta.h" />
+		<Unit filename="src/utils/metronome.h" />
+		<Unit filename="src/utils/resource_allocator.h" />
 		<Unit filename="src/utils/strings.h" />
 		<Extensions>
 			<code_completion />

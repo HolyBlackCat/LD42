@@ -296,16 +296,19 @@ namespace Tiles
     {
         const char *name;
         int tex_index;
+        bool solid;
+        bool slow;
     };
     constexpr int invis = std::numeric_limits<int>::max();
 
     std::map<int, Data> map
     {
-        {00,{"air"     ,invis}},
-        {30,{"shadow"  ,2    }},
-        {20,{"grass"   ,1    }},
-        {10,{"wall"    ,0    }},
-        {40,{"wall_top",3    }},
+        {00,{"air"     ,invis,0,0}},
+        {30,{"shadow"  ,2    ,0,0}},
+        {20,{"grass"   ,1    ,0,0}},
+        {10,{"wall"    ,0    ,1,0}},
+        {40,{"wall_top",3    ,1,0}},
+        {50,{"stairs"  ,4    ,0,1}},
     };
 
     const Data &Info(int index)
@@ -363,25 +366,26 @@ class Map
         using Btn = Interface::Button;
         using Inp = Interface::Inputs::Enum;
         inline static Btn
-            b_prev     = Btn(Inp::num_plus),
-            b_next     = Btn(Inp::num_enter),
-            b_prev_la  = Btn(Inp::num_0),
-            b_next_la  = Btn(Inp::num_period),
-            b_put      = Btn(Inp::mouse_left),
-            b_clear    = Btn(Inp::mouse_right),
-            b_mod_get  = Btn(Inp::l_shift),
-            b_v1       = Btn(Inp::num_1),
-            b_v2       = Btn(Inp::num_2),
-            b_v3       = Btn(Inp::num_3),
-            b_v4       = Btn(Inp::num_4),
-            b_v5       = Btn(Inp::num_5),
-            b_v6       = Btn(Inp::num_6),
-            b_v7       = Btn(Inp::num_7),
-            b_v8       = Btn(Inp::num_8),
-            b_v9       = Btn(Inp::num_9),
-            b_mod_hkey = Btn(Inp::l_ctrl),
-            b_save     = Btn(Inp::s),
-            b_load     = Btn(Inp::space);
+            b_prev      = Btn(Inp::num_plus),
+            b_next      = Btn(Inp::num_enter),
+            b_prev_la   = Btn(Inp::num_0),
+            b_next_la   = Btn(Inp::num_period),
+            b_put       = Btn(Inp::mouse_left),
+            b_clear     = Btn(Inp::mouse_right),
+            b_mod_get   = Btn(Inp::l_shift),
+            b_v1        = Btn(Inp::num_1),
+            b_v2        = Btn(Inp::num_2),
+            b_v3        = Btn(Inp::num_3),
+            b_v4        = Btn(Inp::num_4),
+            b_v5        = Btn(Inp::num_5),
+            b_v6        = Btn(Inp::num_6),
+            b_v7        = Btn(Inp::num_7),
+            b_v8        = Btn(Inp::num_8),
+            b_v9        = Btn(Inp::num_9),
+            b_mod_hkey  = Btn(Inp::l_ctrl),
+            b_save      = Btn(Inp::s),
+            b_load      = Btn(Inp::space),
+            b_set_spawn = Btn(Inp::_1);
 
         ivec2 cursor = ivec2(0);
         int cur_index = 0;
@@ -407,7 +411,7 @@ class Map
             auto &layer = ret.*la;
             if (ret.size.prod() != int(layer.size()))
             {
-                if (layer.empty())
+                if (1 || layer.empty())
                 {
                     layer.resize(ret.size.prod());
                 }
@@ -474,6 +478,10 @@ class Map
         {
             // Get tile pos
             editor.cursor = PixelToTile(mouse.pos() + cam_pos);
+
+            // Set spawn
+            if (editor.b_set_spawn.pressed())
+                spawn_tile = editor.cursor;
 
             // Change layer index
             if (editor.b_prev_la.repeated() && editor.cur_layer > 0)
@@ -623,7 +631,16 @@ struct World
     {
         for (const auto &offset : hitbox)
         {
-            if (map.Get(map.PixelToTile(pos + offset), 2).n != 0)
+            if (Tiles::Info(map.Get(map.PixelToTile(pos + offset), 2).n).solid)
+                return 1;
+        }
+        return 0;
+    }
+    bool Slowed(ivec2 pos, const std::vector<ivec2> &hitbox)
+    {
+        for (const auto &offset : hitbox)
+        {
+            if (Tiles::Info(map.Get(map.PixelToTile(pos + offset), 0).n).slow)
                 return 1;
         }
         return 0;
@@ -640,12 +657,13 @@ int main(int, char**)
     World w;
     w.LoadMap("map.txt");
 
-    w.map.enable_editor = 1;
-
     auto Tick = [&]
     {
         { // Map
             w.map.Tick(w.cam_pos_i);
+
+            if (Interface::Button(Interface::Inputs::grave).pressed())
+                w.map.enable_editor = !w.map.enable_editor;
         }
 
         { // Player
@@ -688,9 +706,15 @@ int main(int, char**)
 
             if (dir)
             {
+                float vel_cap = plr_vel_cap;
+                if (w.Slowed(w.p.pos, plr_hitbox))
+                    vel_cap *= 0.6;
+                if (w.map.enable_editor)
+                    vel_cap *= 3;
+
                 w.p.vel += dir * plr_vel_step;
-                if (w.p.vel.len() > plr_vel_cap)
-                    w.p.vel = w.p.vel.norm() * plr_vel_cap;
+                if (w.p.vel.len() > vel_cap)
+                    w.p.vel = w.p.vel.norm() * vel_cap;
             }
             else
             {
@@ -700,9 +724,9 @@ int main(int, char**)
                     w.p.vel -= w.p.vel.norm() * plr_vel_step;
             }
 
-            if (!w.Solid(iround(w.p.pos.add_x(w.p.vel.x)), plr_hitbox))
+            if (!w.Solid(iround(w.p.pos.add_x(w.p.vel.x)), plr_hitbox) || w.map.enable_editor)
                 w.p.pos.x += w.p.vel.x;
-            if (!w.Solid(iround(w.p.pos.add_y(w.p.vel.y)), plr_hitbox))
+            if (!w.Solid(iround(w.p.pos.add_y(w.p.vel.y)), plr_hitbox) || w.map.enable_editor)
                 w.p.pos.y += w.p.vel.y;
         }
 

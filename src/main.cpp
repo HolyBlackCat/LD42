@@ -5,8 +5,10 @@
 #include <SDL2/SDL.h>
 #include <GLFL/glfl.h>
 
+#include "graphics/blending.h"
 #include "graphics/image.h"
 #include "graphics/shader.h"
+#include "graphics/viewport.h"
 #include "interface/input.h"
 #include "interface/messagebox.h"
 #include "interface/window.h"
@@ -43,7 +45,7 @@ struct Uniforms
 {
     Reflect(Uniforms)
     (
-        (Graphics::Shader::Uniform<fmat4>)(matrix),
+        (Graphics::Shader::VertUniform<fmat4>)(matrix),
     )
 };
 

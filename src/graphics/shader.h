@@ -203,7 +203,8 @@ namespace Graphics::Shader
                 std::string header = cfg.common_header + "\n" + (is_vertex ? cfg.vertex_header : cfg.fragment_header) + "\n";
                 source = header + source;
 
-        std::cout << "\n==================\n" << source << "\n==================\n";
+                // Uncomment to dump source:
+                // std::cout << "\n==================\n" << source << "\n==================\n";
 
                 GLuint object = glCreateShader(is_vertex ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER);
                 if (!object)

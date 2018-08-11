@@ -29,7 +29,7 @@
     struct _refl_interface \
     { \
         /* This type name */\
-        static constexpr const char *name = _refl_name; \
+        inline static const ::std::string name = _refl_name; \
         /* Field count */\
         static constexpr int field_count = ::std::tuple_size_v<decltype(_refl_member_pointers)>; \
         /* Field access */\
@@ -83,11 +83,12 @@ namespace Refl::Custom
     {
         struct Macro // This was made a class so that it can be friend'ed by macro-reflected structs.
         {
-            template <typename T> using interface = typename T::_refl_interface;
+            template <typename T, typename = void> struct impl {};
+            template <typename T> struct impl<T, std::void_t<typename T::_refl_interface>> {using interface = typename T::_refl_interface;};
         };
     }
 
-    template <typename T> struct Structure<T, std::void_t<impl::Macro::interface<T>>> : impl::Macro::interface<T> {};
+    template <typename T> struct Structure<T, std::void_t<typename impl::Macro::impl<T>::interface>> : impl::Macro::impl<T>::interface {};
 }
 
 #endif

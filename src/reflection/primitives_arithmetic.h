@@ -14,7 +14,7 @@ namespace Refl::Custom
 {
     template <typename T> struct Primitive<T, std::enable_if_t<std::is_arithmetic_v<T>>>
     {
-        static constexpr const char *name = []{
+        inline static const std::string name = []{
             if constexpr (std::is_same_v<T, bool              >) return "bool";
             if constexpr (std::is_same_v<T, char              >) return "byte";
             if constexpr (std::is_same_v<T, signed char       >) return "byte";

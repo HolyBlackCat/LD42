@@ -13,6 +13,8 @@ namespace Refl::Custom
     {
         static constexpr std::size_t size(const T &object) {return object.size();}
 
+        inline static const std::string name = "list";
+
         static constexpr auto begin(T &object) {return object.begin();}
         static constexpr auto end  (T &object) {return object.end();}
         static constexpr auto const_begin(const T &object) {return object.begin();}

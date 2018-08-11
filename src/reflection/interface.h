@@ -28,7 +28,7 @@ namespace Refl
         {
             using not_specialized_tag = void; // Don't forget to remove this when specializing.
 
-            static constexpr const char *name = "??";
+            inline static const std::string name = "??";
             static std::string to_string(const T &) {return "??";}
 
             // On success, returns 1, changes the referenced object, and advances the char pointer.
@@ -41,7 +41,7 @@ namespace Refl
             using not_specialized_tag = void; // Don't forget to remove this when specializing.
 
             // Field indices are guaranteed to be in valid range.
-            static constexpr const char *name = "??";
+            inline static const std::string name = "??";
             static constexpr int field_count = 0;
             template <int I> static constexpr void field(T &); // When specialized, should return `auto &`.
             static std::string field_name(int index) {(void)index; return "??";}
@@ -52,7 +52,7 @@ namespace Refl
         {
             using not_specialized_tag = void; // Don't forget to remove this when specializing.
 
-            static constexpr const char *name = "??";
+            inline static const std::string name = "??";
 
             static constexpr std::size_t size(const T &) {return 0;}
 

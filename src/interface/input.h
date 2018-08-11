@@ -4,6 +4,7 @@
 #include <initializer_list>
 #include <vector>
 
+#include "utils/mat.h"
 #include "window.h"
 
 namespace Interface
@@ -133,6 +134,37 @@ namespace Interface
         bool AssignMouseWheel()
         {
             return Assign(Inputs::BeginMouseWheel, Inputs::EndMouseWheel);
+        }
+    };
+
+    struct Mouse
+    {
+        fmat3 matrix = fmat3();
+
+        ivec2 pos() const
+        {
+            return iround((matrix * Window::Instance().MousePos().to_vec3(1)).to_vec2());
+        }
+        ivec2 pos_delta() const
+        {
+            return iround(matrix.to_mat2() * Window::Instance().MousePosDelta());
+        }
+
+        Button left   = Button(Inputs::mouse_left);
+        Button middle = Button(Inputs::mouse_middle);
+        Button right  = Button(Inputs::mouse_right);
+        Button x1     = Button(Inputs::mouse_x1);
+        Button x2     = Button(Inputs::mouse_x2);
+
+
+        void HideCursor(bool hide = 1)
+        {
+            Window::Instance().HideCursor(hide);
+        }
+
+        void RelativeMouseMode(bool relative = 1)
+        {
+            Window::Instance().RelativeMouseMode(relative);
         }
     };
 }

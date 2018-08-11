@@ -127,7 +127,7 @@ namespace Graphics::Shader
             }
         }
 
-        template <typename T> static std::string AppendUniformsToSource(const std::string &source, const Config &cfg, const Preferences &pref)
+        template <typename T> static std::string AppendUniformsToSource(const std::string &source, const Config &cfg, const Preferences &pref, bool is_vertex)
         {
             if constexpr (std::is_void_v<T> || std::is_same_v<T, None_t>)
             {
@@ -141,20 +141,24 @@ namespace Graphics::Shader
                 refl::for_each_field([&](auto index)
                 {
                     constexpr int i = index.value;
-                    using field_type = typename refl::template field_type<i>::type;
-                    header += cfg.uniform;
-                    header += ' ';
-                    header += GlslTypeName<std::remove_extent_t<field_type>>();
-                    header += ' ';
-                    header += pref.uniform_prefix;
-                    header += refl::field_name(i);
-                    if constexpr (std::is_array_v<field_type>)
+                    using field_type_raw = typename refl::template field_type<i>;
+                    if ((field_type_raw::is_vertex && is_vertex) || (field_type_raw::is_fragment && !is_vertex))
                     {
-                        header += '[';
-                        header += std::to_string(std::extent_v<field_type>);
-                        header += ']';
+                        using field_type = typename field_type_raw::type;
+                        header += cfg.uniform;
+                        header += ' ';
+                        header += GlslTypeName<std::remove_extent_t<field_type>>();
+                        header += ' ';
+                        header += pref.uniform_prefix;
+                        header += refl::field_name(i);
+                        if constexpr (std::is_array_v<field_type>)
+                        {
+                            header += '[';
+                            header += std::to_string(std::extent_v<field_type>);
+                            header += ']';
+                        }
+                        header += ";\n";
                     }
-                    header += ";\n";
                 });
 
                 return header + source;
@@ -267,8 +271,8 @@ namespace Graphics::Shader
 
         template <typename AttributesT, typename UniformsT>
         Program(std::string name, const Config &cfg, const Preferences &pref, Meta::tag<AttributesT>, UniformsT &uniforms, const std::string &vert_source, const std::string &frag_source)
-        : Program(name, cfg, AppendUniformsToSource<UniformsT>(AppendAttributesToSource<AttributesT>(vert_source, cfg, pref), cfg, pref),
-                  AppendUniformsToSource<UniformsT>(frag_source, cfg, pref), MakeAttributeList<AttributesT>())
+        : Program(name, cfg, AppendUniformsToSource<UniformsT>(AppendAttributesToSource<AttributesT>(vert_source, cfg, pref), cfg, pref, 1),
+                  AppendUniformsToSource<UniformsT>(frag_source, cfg, pref, 0), MakeAttributeList<AttributesT>())
         {
             if constexpr (std::is_void_v<UniformsT> || std::is_same_v<UniformsT, None_t>)
             {
@@ -339,6 +343,9 @@ namespace Graphics::Shader
         }
 
       public:
+        static constexpr bool is_vertex = 1;
+        static constexpr bool is_fragment = 1;
+
         using type = T;
         using elem_type = std::remove_extent_t<T>;
 
@@ -418,6 +425,16 @@ namespace Graphics::Shader
             else if constexpr (std::is_same_v<effective_elem_type, fmat3x4     >) glUniformMatrix3x4fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
             else static_assert(std::is_void_v<effective_elem_type>, "Uniforms of this type are not supported.");
         }
+    };
+    template <typename T> class VertUniform : public Uniform<T>
+    {
+      public:
+        static constexpr bool is_fragment = 0;
+    };
+    template <typename T> class FragUniform : public Uniform<T>
+    {
+      public:
+        static constexpr bool is_vertex = 0;
     };
 
     template <typename T> inline void Program::AssignUniformLocation(Uniform<T> &uniform, int loc)

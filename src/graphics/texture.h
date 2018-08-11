@@ -41,6 +41,8 @@ namespace Graphics
 
         Data data;
 
+        inline static std::map<GLuint, ivec2> texture_sizes;
+
       public:
         Texture()
         {
@@ -59,12 +61,29 @@ namespace Graphics
 
         ~Texture()
         {
+            texture_sizes.erase(data.handle); // It's a no-op if there is no such handle in the map.
             glDeleteTextures(1, &data.handle);
         }
 
         GLuint Handle() const
         {
             return data.handle;
+        }
+
+        static void SetHandleSize(GLuint handle, ivec2 size)
+        {
+            texture_sizes[handle] = size;
+        }
+        static ivec2 GetHandleSize(GLuint handle)
+        {
+            if (auto it = texture_sizes.find(handle); it != texture_sizes.end())
+                return it->second;
+            else
+                return ivec2(0);
+        }
+        ivec2 Size() const
+        {
+            return GetHandleSize(data.handle);
         }
     };
 
@@ -88,8 +107,6 @@ namespace Graphics
 
         inline static int active_index = 0;
 
-        inline static std::map<GLuint, ivec2> texture_sizes;
-
       public:
         TextureUnit()
         {
@@ -97,11 +114,11 @@ namespace Graphics
             if (!*this)
                 Program::Error("No more texture units.");
         }
-        TextureUnit(GLuint handle) : TextureUnit()
+        explicit TextureUnit(GLuint handle) : TextureUnit()
         {
             AttachHandle(handle);
         }
-        TextureUnit(const Texture &texture) : TextureUnit()
+        explicit TextureUnit(const Texture &texture) : TextureUnit()
         {
             Attach(texture);
         }
@@ -206,17 +223,9 @@ namespace Graphics
             return std::move(*this);
         }
 
-        static ivec2 GetHandleSize(GLuint handle)
-        {
-            if (auto it = texture_sizes.find(handle); it != texture_sizes.end())
-                return it->second;
-            else
-                return ivec2(0);
-        }
-
         ivec2 Size() const
         {
-            return GetHandleSize(data.handle);
+            return Texture::GetHandleSize(data.handle);
         }
 
         TextureUnit &&SetData(ivec2 size, const uint8_t *pixels = 0)
@@ -230,7 +239,7 @@ namespace Graphics
                 return std::move(*this);
             Activate();
             if (data.handle)
-                texture_sizes[data.handle] = size;
+                Texture::SetHandleSize(data.handle, size);
             glTexImage2D(GL_TEXTURE_2D, 0, internal_format, size.x, size.y, 0, format, type, pixels);
             return std::move(*this);
         }

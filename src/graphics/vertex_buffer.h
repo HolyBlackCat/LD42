@@ -13,11 +13,15 @@
 
 namespace Graphics
 {
-    enum Primitive
+    enum DrawMode
     {
-        points    = GL_POINTS,
-        lines     = GL_LINES,
-        triangles = GL_TRIANGLES,
+        points         = GL_POINTS,
+        lines          = GL_LINES,
+        line_strip     = GL_LINE_STRIP,
+        line_loop      = GL_LINE_LOOP,
+        triangles      = GL_TRIANGLES,
+        triangle_strip = GL_TRIANGLE_STRIP,
+        triangle_fan   = GL_TRIANGLE_FAN,
     };
 
     enum Usage
@@ -202,16 +206,16 @@ namespace Graphics
             glBufferSubData(GL_ARRAY_BUFFER, offset, bytes, source);
         }
 
-        void Draw(Primitive p, int from, int count) // Binds for drawing.
+        void Draw(DrawMode p, int from, int count) // Binds for drawing.
         {
             BindDraw();
             glDrawArrays(p, from, count);
         }
-        void Draw(Primitive p, int count) // Binds for drawing.
+        void Draw(DrawMode p, int count) // Binds for drawing.
         {
             Draw(p, 0, count);
         }
-        void Draw(Primitive p) // Binds for drawing.
+        void Draw(DrawMode p) // Binds for drawing.
         {
             Draw(p, 0, Size());
         }

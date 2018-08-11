@@ -10,10 +10,52 @@ Program::Parachute error_parachute;
 
 constexpr ivec2 screen_sz = ivec2(1920,1080)/4;
 Interface::Window win("Alpha", screen_sz*2, Interface::Window::windowed, Interface::Window::Settings{}.MinSize(screen_sz));
+Audio::Context audio;
 Metronome metronome;
 Interface::Mouse mouse;
 
 constexpr ivec2 tile_size = ivec2(16,16);
+
+namespace Sounds
+{
+    #define SOUND_LIST \
+        SOUND( dash               , 0.3  ) \
+
+    namespace Buffers
+    {
+        #define SOUND(NAME, RAND) \
+            Audio::Buffer NAME = Audio::Sound::WAV("assets/" #NAME ".wav");
+        SOUND_LIST
+        #undef SOUND
+    }
+
+    #define SOUND(NAME, RAND) \
+        auto NAME(fvec2 pos, float vol = 1, float pitch = 0) \
+        { \
+            return Buffers::NAME(vol, std::pow(2, pitch + random_real_range(-1,1) * RAND)).pos(pos.to_vec3()); \
+        }
+    SOUND_LIST
+    #undef SOUND
+
+    #undef SOUND_LIST
+
+//    Audio::Buffer theme_buf;
+//    Audio::Source theme;
+//    constexpr float theme_vol = 1/9.;
+//    bool theme_enabled = 1;
+//
+    void Init()
+    {
+        Audio::Source::DefaultRefDistance(200);
+        Audio::Source::DefaultRolloffFactor(1);
+        Audio::Volume(3);
+
+//        theme_buf.Create();
+//        theme_buf.SetData(Audio::Sound::OGG("assets/theme.ogg"));
+//        theme.Create(theme_buf);
+//        theme.loop(1).volume(theme_vol).play();
+    }
+}
 
 namespace Draw
 {
@@ -617,6 +659,7 @@ struct World
     Player p;
 
     fvec2 cam_pos = fvec2(0);
+    fvec2 cam_vel = fvec2(0);
     fvec2 cam_pos_i = fvec2(0);
 
     Map map;
@@ -625,6 +668,8 @@ struct World
     {
         map = Map::FromFile("assets/" + name);
         p.pos = map.SpawnTile() * tile_size + tile_size/2;
+        cam_pos = p.pos;
+        cam_pos_i = iround(cam_pos);
     }
 
     bool Solid(ivec2 pos, const std::vector<ivec2> &hitbox)
@@ -650,7 +695,7 @@ struct World
 
 int main(int, char**)
 {
-    constexpr float plr_vel_step = 0.5, plr_vel_cap = 2;
+    constexpr float plr_vel_step = 0.35, plr_vel_cap = 2.2;
     constexpr int plr_anim_frame_len = 10;
     const std::vector<ivec2> plr_hitbox = {ivec2(-3,-3), ivec2(-3,2), ivec2(2,2), ivec2(2,-3)};
 
@@ -667,71 +712,96 @@ int main(int, char**)
         }
 
         { // Player
+            // Get input direction
             ivec2 dir = ivec2(w.button_right.down() - w.button_left.down(), w.button_down.down() - w.button_up.down());
 
-            if (dir)
-            {
-                w.p.movement_ticks++;
+            { // Update animation
+                if (dir)
+                {
+                    w.p.movement_ticks++;
 
-                int old_state = w.p.anim_state;
+                    int old_state = w.p.anim_state;
 
-                if (dir == ivec2(0,1))
-                    w.p.anim_state = 0;
-                else if (dir == ivec2(1,1))
-                    w.p.anim_state = 1;
-                else if (dir == ivec2(0,-1))
-                    w.p.anim_state = 2;
-                else if (dir == ivec2(-1,1))
-                    w.p.anim_state = 3;
-                else if (dir == ivec2(1,0))
-                    w.p.anim_state = 4;
-                else if (dir == ivec2(-1,0))
-                    w.p.anim_state = 5;
-                else if (dir == ivec2(-1,-1))
-                    w.p.anim_state = 6;
-                else if (dir == ivec2(1,-1))
-                    w.p.anim_state = 7;
+                    if (dir == ivec2(0,1))
+                        w.p.anim_state = 0;
+                    else if (dir == ivec2(1,1))
+                        w.p.anim_state = 1;
+                    else if (dir == ivec2(0,-1))
+                        w.p.anim_state = 2;
+                    else if (dir == ivec2(-1,1))
+                        w.p.anim_state = 3;
+                    else if (dir == ivec2(1,0))
+                        w.p.anim_state = 4;
+                    else if (dir == ivec2(-1,0))
+                        w.p.anim_state = 5;
+                    else if (dir == ivec2(-1,-1))
+                        w.p.anim_state = 6;
+                    else if (dir == ivec2(1,-1))
+                        w.p.anim_state = 7;
 
-                if (old_state != w.p.anim_state)
-                    w.p.anim_frame = 0;
+                    if (old_state != w.p.anim_state)
+                        w.p.anim_frame = 0;
 
-                if (w.p.movement_ticks % plr_anim_frame_len == 0)
-                    w.p.anim_frame = (w.p.anim_frame + 1) % 4;
-            }
-            else
-            {
-                w.p.movement_ticks = 0;
-                w.p.anim_frame = 0;
-            }
-
-            if (dir)
-            {
-                float vel_cap = plr_vel_cap;
-                if (w.Slowed(w.p.pos, plr_hitbox))
-                    vel_cap *= 0.6;
-                if (w.map.enable_editor)
-                    vel_cap *= 3;
-
-                w.p.vel += dir * plr_vel_step;
-                if (w.p.vel.len() > vel_cap)
-                    w.p.vel = w.p.vel.norm() * vel_cap;
-            }
-            else
-            {
-                if (w.p.vel.len() <= plr_vel_step)
-                    w.p.vel = fvec2(0);
+                    if (w.p.movement_ticks % plr_anim_frame_len == 0)
+                        w.p.anim_frame = (w.p.anim_frame + 1) % 4;
+                }
                 else
-                    w.p.vel -= w.p.vel.norm() * plr_vel_step;
+                {
+                    w.p.movement_ticks = 0;
+                    w.p.anim_frame = 0;
+                }
             }
 
-            if (!w.Solid(iround(w.p.pos.add_x(w.p.vel.x)), plr_hitbox) || w.map.enable_editor)
-                w.p.pos.x += w.p.vel.x;
-            if (!w.Solid(iround(w.p.pos.add_y(w.p.vel.y)), plr_hitbox) || w.map.enable_editor)
-                w.p.pos.y += w.p.vel.y;
+            { // Movement control
+                if (dir)
+                {
+                    float vel_cap = plr_vel_cap;
+                    if (w.Slowed(w.p.pos, plr_hitbox))
+                        vel_cap *= 0.6;
+                    if (w.map.enable_editor)
+                        vel_cap *= 3;
+
+                    w.p.vel += dir * plr_vel_step;
+                    if (w.p.vel.len() > vel_cap)
+                        w.p.vel = w.p.vel.norm() * vel_cap;
+                }
+                else
+                {
+                    if (w.p.vel.len() <= plr_vel_step)
+                        w.p.vel = fvec2(0);
+                    else
+                        w.p.vel -= w.p.vel.norm() * plr_vel_step;
+                }
+            }
+
+            { // Update position
+                constexpr float step = 0.7;
+                fvec2 vel_norm = w.p.vel.norm();
+                for (float s = w.p.vel.len(); s >= 0; s -= step)
+                {
+                    float t = min(s, step);
+                    fvec2 v = vel_norm * t;
+
+                    if (!w.Solid(iround(w.p.pos.add_x(v.x)), plr_hitbox) || w.map.enable_editor)
+                        w.p.pos.x += v.x;
+                    if (!w.Solid(iround(w.p.pos.add_y(v.y)), plr_hitbox) || w.map.enable_editor)
+                        w.p.pos.y += v.y;
+                }
+            }
+
+            { // Update audio pos
+                Audio::ListenerPos(w.p.pos.to_vec3(-250));
+            }
         }
 
         { // Camera
-            w.cam_pos = w.p.pos;
+            fvec2 target = w.p.pos;
+            fvec2 delta = target - w.cam_pos;
+            fvec2 dir = delta.norm();
+            float dist = delta.len();
+            w.cam_vel += dir * pow(dist / 60, 2);
+            w.cam_vel *= 0.8;
+            w.cam_pos += w.cam_vel;
             w.cam_pos_i = iround(w.cam_pos);
         }
     };
@@ -748,6 +818,7 @@ int main(int, char**)
         }
     };
 
+    Sounds::Init();
     Draw::Init();
     Draw::Resize();
 
@@ -768,6 +839,9 @@ int main(int, char**)
                 Program::Exit();
 
             Tick();
+
+            audio.CheckErrors();
+            Audio::Source::RemoveUnused();
         }
 
         Draw::fbuf_scale.Bind();
@@ -793,6 +867,8 @@ int main(int, char**)
 
         Graphics::Clear();
         Draw::FullscreenQuad(Draw::scale_factor * screen_sz / fvec2(win.Size()));
+
+        Graphics::CheckErrors();
 
         win.SwapBuffers();
     }

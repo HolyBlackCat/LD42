@@ -56,6 +56,20 @@ namespace Refl
     }
 
 
+    namespace impl
+    {
+        template <typename T> struct is_reflected
+        {
+            static constexpr bool value =
+                Custom::is_specialized<Custom::Primitive<std::remove_cv_t<std::remove_reference_t<T>>>> ||
+                Custom::is_specialized<Custom::Structure<std::remove_cv_t<std::remove_reference_t<T>>>> ||
+                Custom::is_specialized<Custom::Container<std::remove_cv_t<std::remove_reference_t<T>>>>;
+        };
+        template <> struct is_reflected<void> : std::false_type {}; // We can't test void for reflected-ness by normal means, since instantinating interfaces for void generates a hard error.
+    }
+
+    template <typename T> inline constexpr bool is_reflected = impl::is_reflected<T>::value;
+
     template <typename T> class Interface
     {
         using type = std::conditional_t<std::is_reference_v<T>, T, T &>;

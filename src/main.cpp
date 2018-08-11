@@ -8,6 +8,8 @@
 #include "graphics/blending.h"
 #include "graphics/image.h"
 #include "graphics/shader.h"
+#include "graphics/texture.h"
+#include "graphics/vertex_buffer.h"
 #include "graphics/viewport.h"
 #include "interface/input.h"
 #include "interface/messagebox.h"
@@ -25,8 +27,6 @@
 #include "utils/strings.h"
 
 #define main SDL_main
-
-#include <unordered_set>
 
 Program::Parachute error_parachute;
 Interface::Window win("Alpha", vec(800, 600));
@@ -88,15 +88,18 @@ struct B
 
 int main(int, char**)
 {
-//    B obj;
-//    obj.a.x = 1;
-//    obj.a.y = 2;
-//    obj.a.z = 3.3;
-//    obj.a.w = 4.4;
-//    auto refl = Refl::Interface(obj);
-//    std::cout << refl.to_string() << '\n';
+    Graphics::VertexBuffer<Attribs> buf;
 
-    Interface::Button b;
+    Attribs array[]
+    {
+        {fvec2(0,0), fvec3(1,1,0)},
+        {fvec2(1,0), fvec3(0,1,1)},
+        {fvec2(0,1), fvec3(1,0,1)},
+    };
+
+    shader_main.Bind();
+
+    buf.SetData(3, array);
 
     while (1)
     {
@@ -112,30 +115,19 @@ int main(int, char**)
 
         glClear(GL_COLOR_BUFFER_BIT);
 
-        glBegin(GL_TRIANGLES);
-        glColor3f(0.9,0.1,0.6);
-        glVertex2f(-0.5,0.5);
-        glVertex2f(0.5,0.5);
-        glVertex2f(0,-0.5);
-        glEnd();
+        uni.matrix = fmat4::rotate(fvec3(0,0,1), win.Ticks() / 100.0);
+        buf.Draw(Graphics::triangles);
 
-        if (b)
-        {
-            std::cout << " v" << b.pressed()
-                      << " _" << b.down()
-                      << " ^" << b.released()
-                      << " ~" << b.up()
-                      << " :" << b.repeated() << '\n';
-        }
-        else
-        {
-            if (b.AssignKey())
-                std::cout << "Assigned " << b.Name() << "\n";
-        }
+        //Program::Exit();
+
+//        glBegin(GL_TRIANGLES);
+//        glColor3f(0.9,0.1,0.6);
+//        glVertex2f(-0.5,0.5);
+//        glVertex2f(0.5,0.5);
+//        glVertex2f(0,-0.5);
+//        glEnd();
 
         win.SwapBuffers();
-
-        SDL_Delay(200);
     }
 
     return 0;

@@ -286,7 +286,7 @@ namespace Graphics::Shader
                 {
                     constexpr int i = index.value;
                     // Note that we don't need to check the return value. Even if a uniform is not found and -1 location is returned, glUniform* silently no-op when it's used.
-                    AssignUniformLocation(refl.template field_value<i>(), glGetUniformLocation(data.handle, refl.field_name(i).c_str()));
+                    AssignUniformLocation(refl.template field_value<i>(), glGetUniformLocation(data.handle, (pref.uniform_prefix + refl.field_name(i)).c_str()));
                 });
             }
         }
@@ -359,7 +359,7 @@ namespace Graphics::Shader
 
         using effective_elem_type = std::conditional_t<is_texture || is_bool, int, elem_type>; // Textures and bools become ints here
 
-        using elem_base_type = Math::vec_base_t<effective_elem_type>; // Vectors and matrices become scalars here.
+        using elem_base_type = typename std::conditional_t<Math::is_scalar_v<effective_elem_type>, std::enable_if<1, effective_elem_type>, effective_elem_type>::type; // Vectors and matrices become scalars here.
 
         Uniform() {}
 
@@ -381,10 +381,12 @@ namespace Graphics::Shader
             else if constexpr (std::is_same_v<effective_elem_type, ivec2       >) glUniform2i (location, object.x, object.y);
             else if constexpr (std::is_same_v<effective_elem_type, ivec3       >) glUniform3i (location, object.x, object.y, object.z);
             else if constexpr (std::is_same_v<effective_elem_type, ivec4       >) glUniform4i (location, object.x, object.y, object.z, object.w);
+            OnPC(
             else if constexpr (std::is_same_v<effective_elem_type, unsigned int>) glUniform1ui(location, object);
             else if constexpr (std::is_same_v<effective_elem_type, uvec2       >) glUniform2ui(location, object.x, object.y);
             else if constexpr (std::is_same_v<effective_elem_type, uvec3       >) glUniform3ui(location, object.x, object.y, object.z);
             else if constexpr (std::is_same_v<effective_elem_type, uvec4       >) glUniform4ui(location, object.x, object.y, object.z, object.w);
+            )
             else set_no_bind(&object, 1);
             return object;
         }
@@ -403,27 +405,31 @@ namespace Graphics::Shader
             if (count < 0 || offset + count > array_elements)
                 ::Program::Error("Invalid shader uniform array range.");
             int l = location + offset;
-                 if constexpr (std::is_same_v<effective_elem_type, float       >) glUniform1fv (l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fvec2       >) glUniform2fv (l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fvec3       >) glUniform3fv (l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fvec4       >) glUniform4fv (l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, int         >) glUniform1iv (l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, ivec2       >) glUniform2iv (l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, ivec3       >) glUniform3iv (l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, ivec4       >) glUniform4iv (l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, unsigned int>) glUniform1uiv(l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, uvec2       >) glUniform2uiv(l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, uvec3       >) glUniform3uiv(l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, uvec4       >) glUniform4uiv(l, count, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fmat2       >) glUniformMatrix2fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fmat3       >) glUniformMatrix3fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fmat4       >) glUniformMatrix4fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fmat3x2     >) glUniformMatrix3x2fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fmat4x2     >) glUniformMatrix4x2fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fmat2x3     >) glUniformMatrix2x3fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fmat4x3     >) glUniformMatrix4x3fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fmat2x4     >) glUniformMatrix2x4fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
-            else if constexpr (std::is_same_v<effective_elem_type, fmat3x4     >) glUniformMatrix3x4fv(l, count, 0, reinterpret_cast<elem_base_type *>(ptr));
+                 if constexpr (std::is_same_v<effective_elem_type, float       >) glUniform1fv (l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fvec2       >) glUniform2fv (l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fvec3       >) glUniform3fv (l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fvec4       >) glUniform4fv (l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, int         >) glUniform1iv (l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, ivec2       >) glUniform2iv (l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, ivec3       >) glUniform3iv (l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, ivec4       >) glUniform4iv (l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            OnPC(
+            else if constexpr (std::is_same_v<effective_elem_type, unsigned int>) glUniform1uiv(l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, uvec2       >) glUniform2uiv(l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, uvec3       >) glUniform3uiv(l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, uvec4       >) glUniform4uiv(l, count, reinterpret_cast<const elem_base_type *>(ptr));
+            )
+            else if constexpr (std::is_same_v<effective_elem_type, fmat2       >) glUniformMatrix2fv(l, count, 0, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fmat3       >) glUniformMatrix3fv(l, count, 0, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fmat4       >) glUniformMatrix4fv(l, count, 0, reinterpret_cast<const elem_base_type *>(ptr));
+            OnPC(
+            else if constexpr (std::is_same_v<effective_elem_type, fmat3x2     >) glUniformMatrix3x2fv(l, count, 0, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fmat4x2     >) glUniformMatrix4x2fv(l, count, 0, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fmat2x3     >) glUniformMatrix2x3fv(l, count, 0, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fmat4x3     >) glUniformMatrix4x3fv(l, count, 0, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fmat2x4     >) glUniformMatrix2x4fv(l, count, 0, reinterpret_cast<const elem_base_type *>(ptr));
+            else if constexpr (std::is_same_v<effective_elem_type, fmat3x4     >) glUniformMatrix3x4fv(l, count, 0, reinterpret_cast<const elem_base_type *>(ptr));
+            )
             else static_assert(std::is_void_v<effective_elem_type>, "Uniforms of this type are not supported.");
         }
     };
@@ -431,11 +437,15 @@ namespace Graphics::Shader
     {
       public:
         static constexpr bool is_fragment = 0;
+        using Uniform<T>::Uniform;
+        using Uniform<T>::operator=;
     };
     template <typename T> class FragUniform : public Uniform<T>
     {
       public:
         static constexpr bool is_vertex = 0;
+        using Uniform<T>::Uniform;
+        using Uniform<T>::operator=;
     };
 
     template <typename T> inline void Program::AssignUniformLocation(Uniform<T> &uniform, int loc)

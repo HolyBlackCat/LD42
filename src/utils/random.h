@@ -74,12 +74,18 @@ namespace Rand
     {
         return random_real_range<T>(-x, x);
     }
+
+    int random_sign()
+    {
+        return random_int(2) * 2 - 1;
+    }
 }
 
 using Rand::random_int;
 using Rand::random_int_range;
 using Rand::random_real;
 using Rand::random_real_range;
+using Rand::random_sign;
 
 #endif
 

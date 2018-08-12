@@ -20,7 +20,22 @@ constexpr ivec2 tile_size = ivec2(16,16);
 namespace Sounds
 {
     #define SOUND_LIST \
+        SOUND( player_shoots      , 0.3  ) \
+        SOUND( death              , 0.3  ) \
+        SOUND( crystal_shoots     , 0.3  ) \
+        SOUND( boss_hit           , 0.3  ) \
+        SOUND( boss_big_hit       , 0.3  ) \
         SOUND( dash               , 0.3  ) \
+        SOUND( graze              , 0.3  ) \
+        SOUND( phase_changes      , 0.3  ) \
+        SOUND( stopped_by_shield  , 0.3  ) \
+        SOUND( boss_aims          , 0.3  ) \
+        SOUND( boss_shield        , 0.3  ) \
+        SOUND( boss_shield_magic  , 0.3  ) \
+        SOUND( boss_shield_breaks , 0.3  ) \
+        SOUND( boss_charges       , 0.3  ) \
+        SOUND( boss_laser         , 0.3  ) \
+        SOUND( boss_dash          , 0.3  ) \
 
     namespace Buffers
     {
@@ -248,6 +263,7 @@ namespace Draw
             (
                 (Graphics::Shader::FragUniform<Graphics::TextureUnit>)(texture),
                 (Graphics::Shader::FragUniform<Graphics::TextureUnit>)(dither),
+                (Graphics::Shader::FragUniform<float>)(opacity),
             )
         };
         uniforms_t uniforms;
@@ -273,6 +289,7 @@ namespace Draw
             const float step = 1. / 4.;
             light += (dither - 0.5) * step;
             light = round(light / step) * step;
+            light = 1. - ((1. - light) * u_opacity);
             gl_FragColor = vec4(light, 1);
         }
         )"
@@ -406,11 +423,23 @@ namespace Draw
     {
         Quad(pos, size.set_y(0), size.set_x(0), src);
     }
-    void Text(fvec2 pos, std::string str, fvec3 color, float alpha = 1, float beta = 1)
+    template <int A = -1> void Text(fvec2 pos, std::string str, fvec3 color, float alpha = 1, float beta = 1)
     {
         float orig_x = pos.x;
-        for (char ch : str)
+
+        if (A != -1)
         {
+            for (char ch : str)
+            {
+                if (ch == '\n')
+                    break;
+                pos.x -= (A == 0 ? 3 : 6);
+            }
+        }
+
+        for (const char &ch_ref : str)
+        {
+            char ch = ch_ref;
             if ((signed char)ch < 0)
                 ch = '?';
 
@@ -418,6 +447,19 @@ namespace Draw
             {
                 pos.x = orig_x;
                 pos.y += 15;
+
+                if (A != -1)
+                {
+                    const char *ptr = &ch_ref + 1;
+
+                    while (*ptr)
+                    {
+                        if (*ptr == '\n')
+                            break;
+                        pos.x -= (A == 0 ? 3 : 6);
+                        ptr++;
+                    }
+                }
             }
             else
             {
@@ -462,8 +504,10 @@ namespace Draw
 
         ShaderLightApply::uniforms.texture = Draw::texture_unit_light;
         ShaderLightApply::uniforms.dither = Draw::texture_unit_dither;
+        ShaderLightApply::uniforms.opacity = 0.9;
 
         Queue::array.reserve(Queue::size);
+        LightQueue::array.reserve(Queue::size);
 
         Graphics::Blending::Enable();
         Graphics::Blending::FuncNormalPre();
@@ -798,11 +842,95 @@ struct Player
 {
     fvec2 pos = fvec2(0);
     fvec2 vel = fvec2(0);
+    fvec2 dir = fvec2(0,1);
+
+    int fire_cooldown = 20; // Arbitrary starting value.
+    int fire_len = 0;
+    fvec2 fire_source = fvec2(0);
+    fvec2 fire_dir = fvec2(0);
 
     int anim_state = 0;
     int anim_frame = 0;
 
+    int dash_cooldown = 20; // Arbitrary starting value.
+    int dash_len = 0;
+
     int movement_ticks = 0;
+
+    bool grazed_this_tick = 0;
+
+    bool dead = 0;
+    int death_timer = 0;
+    int death_msg_index = 0;
+    bool respawning = 0;
+
+    fvec2 Center() const
+    {
+        return pos.sub_y(8);
+    }
+};
+
+struct Boss
+{
+    enum class Phase
+    {
+        crystals,
+        first,
+        more_crystals,
+        magic,
+    };
+
+    Phase phase = Phase::crystals;
+    int phase_time = 1; // Sic!
+
+    fvec2 target_pos = fvec2(0);
+    fvec2 pos = fvec2(0);
+    int invin = 0;
+
+    bool safe_shield = 1;
+    bool magic_shield = 0;
+    bool magic_shield_broken = 0;
+
+    bool crystals_wait = 1;
+    bool first_preparing = 1;
+    fvec2 first_prep_dir = fvec2(0,-1);
+    int first_rot_sign = 1;
+    float first_rad = 0;
+    float first_angle = 0;
+    float first_laser_angle = 0;
+    float first_laser_len = 0;
+    bool first_enable_laser = 0;
+    bool first_laser_deadly = 0;
+    bool mcr_moving_back = 1;
+    bool mgc_preparing = 1;
+    fvec2 mgc_target = fvec2(0);
+    fvec2 mgc_dest = fvec2(0);
+    int mgc_unit = 0;
+    int mgc_time = 0;
+
+    int hits_taken = 0;
+    int prev_hits_taken = 0;
+
+    struct Crystal
+    {
+        ivec2 pos;
+        int hp = 3;
+        int invin = 0;
+    };
+
+    std::vector<Crystal> crystal_list;
+
+    struct MagicOrb
+    {
+        fvec2 pos = fvec2(0);
+        fvec2 target_pos = fvec2(0);
+        int hp = 3;
+        int invin = 0;
+
+        MagicOrb(fvec2 pos) : pos(pos), target_pos(pos) {}
+    };
+
+    std::vector<MagicOrb> magic_orb_list;
 };
 
 struct World
@@ -810,12 +938,15 @@ struct World
     using Btn = Interface::Button;
     using Inp = Interface::Inputs::Enum;
 
-    Btn button_up    = Inp::w;
-    Btn button_down  = Inp::s;
-    Btn button_left  = Inp::a;
-    Btn button_right = Inp::d;
+    Btn button_up    = Inp::up;
+    Btn button_down  = Inp::down;
+    Btn button_left  = Inp::left;
+    Btn button_right = Inp::right;
+    Btn button_fire  = Inp::x;
+    Btn button_dash  = Inp::z;
 
     Player p;
+    Boss b;
 
     fvec2 cam_pos = fvec2(0);
     fvec2 cam_vel = fvec2(0);
@@ -823,7 +954,140 @@ struct World
 
     fvec2 cloud_offset = fvec2(0);
 
+    float target_light_rad = 1000; // Arbitrary starting value.
+    float cur_light_rad = 1000; // Arbitrary starting value.
+
+    float darkness = 1;
+    float whiteness = 0;
+
+    float dark_force_timer = 1;
+    fvec2 dark_force_pos[2] {};
+
+    bool enable_light = 0;
+
     Map map;
+
+    struct Bullet
+    {
+        enum Type {player, crystal};
+        Type type;
+
+        fvec2 pos;
+        fvec2 vel;
+
+        float LightSize() const
+        {
+            return 40;
+        }
+        fvec3 LightColor() const
+        {
+            switch (type)
+            {
+              case player:
+                return fvec3(0.05,0.2,1);
+              case crystal:
+                return fvec3(1, 0.3, 0.05) * 2.5;
+            }
+            return fvec3(1);
+        }
+        void Render(ivec2 cam_pos) const
+        {
+            constexpr ivec2 size(32);
+            switch (type)
+            {
+              case player:
+                Quad(iround(pos) - cam_pos - size/2, size, Src4(ivec2(96,64), size, 1, 0));
+                break;
+              case crystal:
+                Quad(iround(pos) - cam_pos - size/2, size, Src4(ivec2(96+32,64), size, 1, 0));
+                break;
+            }
+        }
+        void DeathEffect(World &w) const
+        {
+            switch (type)
+            {
+              case player:
+                for (int i = 0; i < 2; i++)
+                {
+                    fvec2 p = pos + vel.norm() * random_real_range(1) + vel.norm().rot90() * random_real_range(1);
+                    fvec3 c(random_real_range(0.5,1), 1, 1);
+                    w.AddParticle(c, 1, 0.5, p, vel.angle() + f_pi + random_real_range(0.1), random_real_range(0.16), random_real_range(1,3), random_real_range(12,18), random_int_range(10,30));
+                }
+                break;
+              case crystal:
+                for (int i = 0; i < 16; i++)
+                {
+                    fvec2 p = pos + vel.norm() * random_real_range(1) + vel.norm().rot90() * random_real_range(1);
+                    fvec3 c(1, random_real_range(0.2,1), 0);
+                    w.AddParticle(c, 1, 0.5, p, random_real_range(f_pi), random_real_range(0.3), random_real_range(1,3), random_real_range(16,22), random_int_range(10,30));
+                }
+                break;
+            }
+        }
+        bool Enemy() const
+        {
+            return type != player;
+        }
+        float Homing() const
+        {
+            switch (type)
+            {
+              case player:
+                return -1;
+              case crystal:
+                return 0.01;
+            }
+            return -1;
+        }
+        float CollisionRadius() const
+        {
+            switch (type)
+            {
+              case player:
+                return 3;
+              case crystal:
+                return 6;
+            }
+            return 1;
+        }
+    };
+
+    std::deque<Bullet> bullet_list;
+
+    void AddBullet(fvec2 pos, fvec2 vel, Bullet::Type type)
+    {
+        bullet_list.push_back(Bullet{type, pos, vel});
+    }
+
+    struct Particle
+    {
+        fvec3 color;
+        float alpha, beta;
+        fvec2 pos;
+        float dir, av;
+        float speed;
+        float size;
+        int life;
+        int cur_life = 0;
+    };
+
+    std::deque<Particle> particle_list;
+
+    void AddParticle(fvec3 color, float alpha, float beta, fvec2 pos, float dir, float av, float speed, float size, int life)
+    {
+        Particle tmp;
+        tmp.color = color;
+        tmp.alpha = alpha;
+        tmp.beta = beta;
+        tmp.pos = pos;
+        tmp.dir = dir;
+        tmp.av = av;
+        tmp.speed = speed;
+        tmp.size = size;
+        tmp.life = life;
+        particle_list.push_back(tmp);
+    }
 
 
     struct Light
@@ -859,6 +1123,7 @@ struct World
         p.pos = map.SpawnTile() * tile_size + tile_size/2;
         cam_pos = p.pos;
         cam_pos_i = iround(cam_pos);
+        b.pos = b.target_pos = BossHome();
     }
 
     bool Solid(ivec2 pos, const std::vector<ivec2> &hitbox)
@@ -879,20 +1144,82 @@ struct World
         }
         return 0;
     }
+
+    fvec2 BossHome() const
+    {
+        return map.BossTile() * tile_size + tile_size/2;
+    }
 };
 
 
 int main(int, char**)
 {
-    constexpr float plr_vel_step = 0.35, plr_vel_cap = 2.2;
-    constexpr int plr_anim_frame_len = 10;
-    const std::vector<ivec2> plr_hitbox = {ivec2(-3,-3), ivec2(-3,2), ivec2(2,2), ivec2(2,-3)};
+    constexpr float
+        plr_vel_step = 0.35, plr_vel_cap = 2.2, crystal_dist = 215, crystal_dist_2 = 170, crystal_anim_offset = 2, plr_bullet_speed = 4,
+        plr_hitbox_rad = 6, scr_transition_step = 0.006, scr_transition_step_fast = 0.01, plr_dash_speed = 6,
+        dark_force_step = 0.004, dark_force_max_dist = 200, boss_laser_offset = 20, boss_laser_hitbox_w = 10, boss_hitbox_rad = 18, orb_hitbox_rad = 9;
+    constexpr int
+        plr_anim_frame_len = 10, crystal_anim_period = 180, plr_fire_cooldown = 18, plr_fire_len = 8, enemy_invin_frames = 20, plr_dash_cooldown = 30, plr_dash_len = 8;
+    const std::vector<ivec2> plr_hitbox = {ivec2(-3,-3), ivec2(-3,2), ivec2(2,2), ivec2(2,-3)},
+                             bullet_hitbox = {ivec2(-2,-2), ivec2(-2,1), ivec2(1,1), ivec2(1,-2)},
+                             point_hitbox = {ivec2(0)};
+
+    const std::vector<std::string> death_messages
+    {
+        "",
+        "Again...",
+        "Once again",
+        "Alright, new tactic: git gud",
+        "Rekt",
+        "Oh noes!",
+        "Don't give up!",
+        "Try shooting the enemy",
+        "You were close",
+        "Is it even possible?",
+        "Darkness is dangerous!",
+        "How!?",
+        "Wanna try again?",
+    };
 
     World w;
     w.LoadMap("map.txt");
 
+    World saved_world = w;
+
     auto Tick = [&]
     {
+        w.p.grazed_this_tick = 0;
+
+        auto KillPlayer = [&]
+        {
+            if (w.p.dead)
+                return;
+            if (w.p.dash_len > 0)
+            {
+                if (!w.p.grazed_this_tick)
+                {
+                    w.p.grazed_this_tick = 1;
+                    Sounds::graze(w.p.Center());
+                }
+                return;
+            }
+
+            Sounds::death(fvec2(0)).relative();
+
+            w.p.dead = 1;
+            w.whiteness = 1;
+            w.p.death_msg_index = random_int(death_messages.size());
+
+            for (int i = 0; i < 24; i++)
+            {
+                float c = random_real_range(0,1);
+                w.AddParticle(fvec3(c, 4/5. + 1/5. * c, 1), 1, 0.5, w.p.Center() + fvec2::dir(random_real_range(f_pi), 4), random_real_range(f_pi), random_real_range(0.2),
+                              random_real_range(0.2,2), random_real_range(2,6), random_int_range(30,80));
+            }
+        };
+
+        auto &boss = w.b;
+
         { // Map
             w.map.Tick(w.cam_pos_i);
 
@@ -903,10 +1230,12 @@ int main(int, char**)
         { // Player
             // Get input direction
             ivec2 dir = ivec2(w.button_right.down() - w.button_left.down(), w.button_down.down() - w.button_up.down());
+            if (w.p.dead) dir = ivec2(0);
 
             { // Update animation
-                if (dir)
+                if (dir && !w.p.dash_len)
                 {
+                    w.p.dir = dir.norm();
                     w.p.movement_ticks++;
 
                     int old_state = w.p.anim_state;
@@ -941,8 +1270,38 @@ int main(int, char**)
                 }
             }
 
+            { // Dash
+                if (!w.p.dead)
+                {
+                    if (w.p.dash_cooldown == 0)
+                    {
+                        if (w.button_dash.pressed())
+                        {
+                            w.p.dash_cooldown = plr_dash_cooldown;
+                            w.p.dash_len = plr_dash_len;
+                            w.p.vel = w.p.dir * plr_dash_speed;
+                            Sounds::dash(w.p.Center());
+                        }
+                    }
+                    else
+                    {
+                        w.p.dash_cooldown--;
+                    }
+                }
+            }
+
             { // Movement control
-                if (dir)
+                if (w.p.dash_len > 0)
+                {
+                    w.p.dash_len--;
+                    for (int i = 0; i < 6; i++)
+                    {
+                        fvec2 pos = w.p.Center() + w.p.dir * random_real_range(0, 6) + w.p.dir.rot90() * random_real_range(2);
+                        fvec3 color(random_real_range(0.5,1), 1, 1);
+                        w.AddParticle(color, 1, 0.5, pos, w.p.dir.angle(), random_real_range(0.5), random_real_range(0.5,1.2), random_real_range(6,10), random_int_range(10,30));
+                    }
+                }
+                else if (dir)
                 {
                     float vel_cap = plr_vel_cap;
                     if (w.Slowed(w.p.pos, plr_hitbox))
@@ -958,33 +1317,780 @@ int main(int, char**)
                 {
                     if (w.p.vel.len() <= plr_vel_step)
                         w.p.vel = fvec2(0);
+                    else if (w.p.vel.len() > plr_vel_cap)
+                        w.p.vel = w.p.vel.norm() * plr_vel_cap;
                     else
                         w.p.vel -= w.p.vel.norm() * plr_vel_step;
                 }
             }
 
-            { // Update position
-                constexpr float step = 0.7;
-                fvec2 vel_norm = w.p.vel.norm();
-                for (float s = w.p.vel.len(); s >= 0; s -= step)
+            { // Shooting
+                if (!w.p.dead)
                 {
-                    float t = min(s, step);
-                    fvec2 v = vel_norm * t;
+                    if (w.p.fire_cooldown)
+                        w.p.fire_cooldown--;
 
-                    if (!w.Solid(iround(w.p.pos.add_x(v.x)), plr_hitbox) || w.map.enable_editor)
-                        w.p.pos.x += v.x;
-                    if (!w.Solid(iround(w.p.pos.add_y(v.y)), plr_hitbox) || w.map.enable_editor)
-                        w.p.pos.y += v.y;
+                    if (w.button_fire.pressed() && w.p.fire_cooldown == 0)
+                    {
+                        Sounds::player_shoots(w.p.Center() + w.p.dir * 20);
+                        w.p.fire_cooldown = plr_fire_cooldown;
+                        w.p.fire_len = plr_fire_len;
+                        w.p.fire_source = w.p.Center();
+                        w.p.fire_dir = (dir ? fvec2(dir).norm() : w.p.dir);
+
+                        for (int i = 0; i < 10; i++)
+                        {
+                            fvec2 pos = w.p.fire_source + w.p.fire_dir * random_real_range(1) + w.p.fire_dir.rot90() * random_real_range(1);
+                            fvec3 color(random_real_range(0.5,1), 1, 1);
+                            w.AddParticle(color, 1, 0.5, pos, w.p.fire_dir.angle(), random_real_range(0.1), random_real_range(1,3), random_real_range(10,15), random_int_range(10,30));
+                        }
+                    }
+                    if (w.p.fire_len)
+                    {
+                        w.p.fire_len--;
+                        fvec2 pos = w.p.fire_source + w.p.fire_dir * 4;
+                        w.AddBullet(pos, w.p.fire_dir * plr_bullet_speed, World::Bullet::player);
+                    }
+                }
+            }
+
+            { // Update position
+                if (!w.p.dead)
+                {
+                    constexpr float step = 0.7;
+                    fvec2 vel_norm = w.p.vel.norm();
+                    for (float s = w.p.vel.len(); s >= 0; s -= step)
+                    {
+                        float t = min(s, step);
+                        fvec2 v = vel_norm * t;
+
+                        if (!w.Solid(iround(w.p.pos.add_x(v.x)), plr_hitbox) || w.map.enable_editor)
+                            w.p.pos.x += v.x;
+                        if (!w.Solid(iround(w.p.pos.add_y(v.y)), plr_hitbox) || w.map.enable_editor)
+                            w.p.pos.y += v.y;
+                    }
                 }
             }
 
             { // Update audio pos
-                Audio::ListenerPos(w.p.pos.to_vec3(-250));
+                Audio::ListenerPos(w.p.Center().to_vec3(-250));
+            }
+
+            { // Death effects
+                if (w.p.dead)
+                {
+                    w.p.death_timer++;
+                }
+            }
+
+            { // Light
+                w.AddLight(fvec3(1), w.p.Center(), 0, 0, 0, random_real_range(60,70), 2);
+            }
+        }
+
+        { // Boss
+            Boss::Phase old_phase = boss.phase;
+
+            bool damaged = 0;
+
+            { // Check health
+                if (boss.hits_taken > boss.prev_hits_taken)
+                {
+                    if (boss.hits_taken >= 3)
+                    {
+                        Sounds::boss_big_hit(boss.pos);
+                        boss.hits_taken = 0;
+                        damaged = 1;
+                    }
+                    else
+                    {
+                        Sounds::boss_hit(boss.pos);
+                    }
+                }
+
+                boss.prev_hits_taken = boss.hits_taken;
+            }
+
+            // Primary logic
+            switch (boss.phase)
+            {
+              case Boss::Phase::crystals:
+                {
+                    if (boss.phase_time == 1)
+                    {
+                        w.target_light_rad = 440;
+                        w.cur_light_rad = 600;
+
+                        // Make crystals
+                        for (int i = 0; i < 4; i++)
+                        {
+                            float a = f_pi/4 + f_pi/2 * i;
+                            Boss::Crystal tmp;
+                            tmp.pos = iround(fvec2::dir(a, crystal_dist)).sub_y(16) + w.BossHome();
+                            boss.crystal_list.push_back(tmp);
+                        }
+                    }
+                    if (boss.crystal_list.empty() && boss.safe_shield)
+                    {
+                        boss.safe_shield = 0;
+                        Sounds::boss_shield_breaks(boss.pos);
+                    }
+
+                    if (damaged)
+                    {
+                        boss.phase = Boss::Phase::first;
+                    }
+                }
+                break;
+
+              case Boss::Phase::first:
+                {
+                    if (boss.phase_time == 1)
+                    {
+                        w.target_light_rad = 300;
+                        boss.first_prep_dir = fvec2(1,0).rot90(random_int(4));
+                        boss.first_rot_sign = random_sign();
+                        boss.safe_shield = 1;
+                        Sounds::boss_shield(boss.pos);
+                    }
+                    if (boss.first_preparing)
+                    {
+                        boss.target_pos += boss.first_prep_dir * 0.75;
+                        fvec2 delta = boss.pos - w.BossHome();
+                        float dist = delta.len();
+                        if (dist > 250)
+                        {
+                            boss.first_preparing = 0;
+                            boss.first_rad = dist;
+                            boss.first_angle = delta.angle();
+                            boss.first_laser_angle = (w.p.Center() - boss.pos).angle();
+                        }
+                    }
+                    else
+                    {
+                        // Timing
+                        if (boss.phase_time == 500)
+                        {
+                            boss.first_enable_laser = 1;
+                            Sounds::boss_charges(boss.pos);
+                        }
+
+                        if (boss.phase_time == 660)
+                        {
+                            boss.first_laser_deadly = 1;
+                            boss.safe_shield = 0;
+                            Sounds::boss_laser(boss.pos);
+                            // No shield break sound, because it would interfere with laser sound.
+                        }
+
+                        // Move
+                        constexpr float angle_step = 0.003;
+                        while (boss.first_angle < -f_pi) boss.first_angle += 2*f_pi;
+                        while (boss.first_angle >  f_pi) boss.first_angle -= 2*f_pi;
+                        boss.first_angle += angle_step * boss.first_rot_sign;
+                        boss.first_laser_angle += angle_step * boss.first_rot_sign;
+                        boss.target_pos = w.BossHome() + fvec2::dir(boss.first_angle, boss.first_rad);
+                    }
+
+                    if (damaged)
+                    {
+                        boss.phase = Boss::Phase::more_crystals;
+                    }
+                }
+                break;
+
+              case Boss::Phase::more_crystals:
+                {
+                    if (boss.phase_time == 1)
+                    {
+                        w.target_light_rad = 170;
+                        Sounds::boss_shield(boss.pos);
+                        boss.safe_shield = 1;
+                        boss.first_laser_deadly = 0;
+
+                        boss.crystals_wait = 1;
+
+                        bool vert = abs((w.p.Center() - w.BossHome()).ratio()) > 1;
+
+                        // Make crystals
+                        for (int i = 0; i < 2; i++)
+                        {
+                            float a = f_pi * i + vert * f_pi/2;
+                            Boss::Crystal tmp;
+                            tmp.pos = iround(fvec2::dir(a, crystal_dist_2)).sub_y(16) + w.BossHome();
+                            boss.crystal_list.push_back(tmp);
+
+                            for (int i = 0; i < 16; i++)
+                            {
+                                fvec3 c(1, random_real_range(0.2,1), 0);
+                                w.AddParticle(c, 1, 0.5, tmp.pos + fvec2(random_real_range(1), random_real_range(1)), random_real_range(f_pi), random_real_range(0.2),
+                                              random_real_range(1,3), random_real_range(18,24), random_int_range(10,35));
+                            }
+                        }
+                    }
+
+                    if (boss.phase_time == 30)
+                    {
+                        boss.first_enable_laser = 0;
+                    }
+
+                    // Move to center
+                    if (boss.mcr_moving_back)
+                    {
+                        constexpr float step = 0.75;
+
+                        fvec2 delta = w.BossHome() - boss.target_pos;
+                        float len = delta.len();
+
+                        if (len <= step * 1.01)
+                        {
+                            boss.target_pos = w.BossHome();
+                            boss.mcr_moving_back = 0;
+                            boss.crystals_wait = 0;
+                        }
+                        else
+                        {
+                            boss.target_pos += delta.norm() * step;
+                        }
+                    }
+
+                    if (boss.crystal_list.empty() && boss.safe_shield)
+                    {
+                        boss.safe_shield = 0;
+                        Sounds::boss_shield_breaks(boss.pos);
+                    }
+
+                    if (damaged)
+                    {
+                        boss.phase = Boss::Phase::magic;
+                    }
+                }
+                break;
+
+              case Boss::Phase::magic:
+                {
+                    if (boss.phase_time == 1)
+                    {
+                        w.target_light_rad = 130;
+                        boss.safe_shield = 0;
+                        boss.magic_shield = 1;
+                        Sounds::boss_shield_magic(boss.pos);
+                        for (int s = -1; s <= 1; s += 2)
+                            boss.magic_orb_list.push_back(Boss::MagicOrb(w.BossHome() + fvec2::dir(-f_pi/2 + s*f_pi/4, 113).add_x(s*16).sub_y(32)));
+                    }
+
+                    if (boss.mgc_preparing)
+                    {
+                        boss.target_pos.y -= 1;
+
+                        if ((boss.pos - w.BossHome()).len() > 250)
+                            boss.mgc_preparing = 0;
+                    }
+                    else
+                    {
+                        constexpr int period = 80;
+                        constexpr float overshoot_dist = 120, dash_speed = 5;
+
+                        if (boss.magic_orb_list.empty() && !boss.magic_shield_broken)
+                        {
+                            Sounds::boss_shield_breaks(boss.pos);
+                            boss.magic_shield_broken = 1;
+                        }
+
+                        int unit_count = 1 + boss.magic_orb_list.size();
+                        int unit = boss.mgc_time / period % unit_count;
+                        int time = boss.mgc_time % period;
+
+                        auto UnitPos = [&]() -> fvec2 &
+                        {
+                            if (unit == unit_count - 1)
+                                return boss.target_pos;
+                            else
+                                return boss.magic_orb_list[unit].target_pos;
+                        };
+
+                        if (time == 10 && w.p.dead)
+                            boss.mgc_time--;
+
+                        if (time == 30)
+                        {
+                            boss.mgc_target = w.p.Center();
+                            boss.mgc_dest = boss.mgc_target + (boss.mgc_target - UnitPos()).norm() * overshoot_dist;
+                            Sounds::boss_aims(w.p.pos);
+                        }
+
+                        if (time == 64)
+                        {
+                            // We play sound here because `time == 65` will be stuck for the entire dash.
+                            Sounds::boss_dash(boss.pos);
+                        }
+                        if (time == 65)
+                        {
+                            fvec2 delta = boss.mgc_dest - UnitPos();
+                            float len = delta.len();
+                            if (len <= dash_speed * 1.01)
+                            {
+                                UnitPos() = boss.mgc_dest;
+
+                                fvec2 dir = (w.p.Center() - UnitPos()).norm();
+
+                                if (boss.magic_orb_list.size() < 2)
+                                {
+                                    bool many = boss.magic_orb_list.empty();
+                                    for (int i = -many; i <= many; i++)
+                                    {
+                                        fvec2 d = fvec2::dir(dir.angle() + i * f_pi/12, dir.len());
+                                        w.AddBullet(UnitPos() + d * (unit == unit_count - 1 ? 50 : 6), d * 2, World::Bullet::crystal);
+                                    }
+                                    Sounds::crystal_shoots(UnitPos());
+                                }
+                            }
+                            else
+                            {
+                                UnitPos() += delta.norm() * dash_speed;
+                                boss.mgc_time--;
+                            }
+                        }
+
+                        if (time == period-1)
+                            boss.mgc_unit++;
+
+                        boss.mgc_unit %= unit_count;
+
+                        boss.mgc_time++;
+                    }
+                }
+                break;
+            }
+
+            // Effects of changing phase
+            if (boss.phase != old_phase)
+            {
+                Sounds::phase_changes(w.p.pos, 10); // We play it at player pos, otherwise it's too hard to hear
+                boss.phase_time = 0;
+            }
+
+            { // Move to target
+                boss.pos += (boss.target_pos - boss.pos) * 0.1;
+            }
+
+            { // Crystals
+                int period = boss.crystal_list.size() * 40 - 15;
+                for (int i = 0; i < int(boss.crystal_list.size()); i++)
+                {
+                    auto &it = boss.crystal_list[i];
+
+                    { // Effect
+                        float c = random_real_range(0, 1);
+                        w.AddParticle(fvec3(1, c, 0.5 + c/2), 0.3, 0.2, it.pos + fvec2(random_real_range(2), random_real_range(2)), 0, 0, 0, random_real_range(70,75), 3);
+                    }
+
+                    // Light
+                    w.AddLight(fvec3(1,0.8,0.2)*2, it.pos, 0, 0, 0, random_real_range(60,70), 2);
+
+                    // Spawn bullet
+                    if (!boss.crystals_wait && !w.p.dead && int(metronome.ticks % period) == iround(i / float(boss.crystal_list.size()) * period))
+                    {
+                        fvec2 dir = (w.p.Center() - it.pos).norm();
+                        w.AddBullet(it.pos + dir * 6, dir * 2, World::Bullet::crystal);
+                        Sounds::crystal_shoots(it.pos);
+                    }
+
+                    // Kill player on collision
+                    if ((it.pos - w.p.pos).len() < plr_hitbox_rad + 16)
+                        KillPlayer();
+
+                    if (it.invin > 0)
+                        it.invin--;
+                }
+            }
+
+            // Laser
+            if (boss.first_enable_laser)
+            {
+                { // Rotate laser
+                    float step = boss.first_laser_deadly ? 0.006 : 0.02;
+
+                    fvec2 target_dir = (w.p.Center() - boss.pos).norm();
+                    fvec2 dir = fvec2::dir(boss.first_laser_angle);
+                    float angle_delta = acos(dir /dot/ target_dir) * sign(dir /cross/ target_dir);
+                    if (abs(angle_delta) < step)
+                        boss.first_laser_angle = target_dir.angle();
+                    else
+                        boss.first_laser_angle += sign(angle_delta) * step;
+                }
+
+                { // Fire laser
+                    fvec2 laser_dir = fvec2::dir(boss.first_laser_angle);
+                    fvec2 laser_end = boss.pos;
+                    float laser_step = 6;
+                    for (int i = 0; i < 1000; i++)
+                    {
+                        fvec2 test = laser_end + laser_dir * laser_step;
+                        if (w.Solid(test, point_hitbox))
+                        {
+                            laser_step /= 2;
+                            if (laser_step < 0.05)
+                                break;
+                        }
+                        else
+                        {
+                            laser_end = test;
+                        }
+                    }
+                    boss.first_laser_len = (laser_end - boss.pos).len();
+                }
+
+                { // Laser particles
+                    if (boss.first_enable_laser)
+                    {
+                        fvec2 dir = fvec2::dir(boss.first_laser_angle);
+                        fvec2 pos = boss.pos + dir * boss.first_laser_len;
+                        for (int i = 0; i < 2; i++)
+                        {
+                            fvec2 p = pos + dir * random_real_range(1) +dir.rot90() * random_real_range(1);
+                            fvec3 c(1, random_real_range(0.5,1), 0.5);
+                            float size = boss.first_laser_deadly ? random_real_range(10,20) : random_real_range(2,5);
+                            int life = random_int_range(10,30);
+                            w.AddParticle(c, 1, 0.5, p, random_real_range(f_pi), random_real_range(0.3), random_real_range(1,3), size, life);
+                        }
+                        pos = boss.pos + dir * boss_laser_offset;
+                        for (int i = 0; i < 2; i++)
+                        {
+                            fvec2 p = pos + dir * random_real_range(1) +dir.rot90() * random_real_range(1);
+                            fvec3 c(1, random_real_range(0.5,1), 0.5);
+                            float size = boss.first_laser_deadly ? random_real_range(10,20) : random_real_range(2,5);
+                            int life = random_int_range(10,30);
+                            w.AddParticle(c, 1, 0.5, p, boss.first_laser_angle + random_real_range(f_pi / 16), random_real_range(0.15), random_real_range(1,3), size, life);
+                        }
+                    }
+                }
+
+                { // Kill player with laser
+                    if (boss.first_laser_deadly)
+                    {
+                        fvec2 d = fvec2::dir(boss.first_laser_angle), n = d.rot90();
+                        float half = boss_laser_hitbox_w / 2;
+                        fvec2 delta = w.p.Center() - boss.pos;
+                        float dist_a = delta /dot/ d, dist_b = delta /dot/ n;
+                        if (dist_a > boss_laser_offset && dist_a < boss.first_laser_len + half && abs(dist_b) < half)
+                        {
+                            KillPlayer();
+                        }
+                    }
+
+                    if (w.p.dead && w.p.death_timer > 30)
+                        boss.first_laser_deadly = 0;
+                }
+            }
+
+            { // Magic orbs
+                for (auto &it : boss.magic_orb_list)
+                {
+                    it.pos += (it.target_pos - it.pos) * 0.1;
+
+                    if (it.invin > 0)
+                        it.invin--;
+
+                    if ((w.p.pos - it.pos).len() < plr_hitbox_rad + orb_hitbox_rad)
+                        KillPlayer();
+                }
+            }
+
+            { // Kill player on body collision
+                if ((boss.pos - w.p.pos).len() < plr_hitbox_rad + boss_hitbox_rad)
+                    KillPlayer();
+            }
+
+            constexpr float shield_rad = 48;
+
+            { // Safe shield
+
+                if (boss.safe_shield)
+                {
+                    // Push player
+                    fvec2 delta = w.p.pos - boss.pos;
+                    if (delta.len() < shield_rad)
+                    {
+                        delta = delta.norm();
+                        fvec2 new_pos = boss.pos + (delta * (shield_rad + 1));
+                        if (!w.Solid(iround(new_pos), plr_hitbox))
+                            w.p.pos = new_pos;
+                        Sounds::stopped_by_shield(boss.pos);
+                        for (int i = 0; i < 2; i++)
+                        {
+                            float c = random_real_range(0.4,0.9);
+                            int sign = random_sign();
+                            w.AddParticle(fvec3(c), 0.5, 0.2, w.p.pos - delta*5 + fvec2(random_real_range(2), random_real_range(2)), delta.angle() - f_pi/2*sign, random_real(0.15)*sign,
+                                          random_real_range(2,3), random_real_range(4,6), random_real_range(20,40));
+                        }
+                    }
+
+                    // Deflect bullets
+                    for (auto &it : w.bullet_list)
+                    {
+                        fvec2 delta = boss.pos - it.pos;
+                        if (delta.len() > shield_rad)
+                            continue;
+                        if (it.vel /dot/ delta < 0)
+                            continue;
+                        delta = delta.norm();
+                        it.vel -= it.vel /dot/ delta * delta * 2;
+                        Sounds::stopped_by_shield(boss.pos);
+                    }
+                }
+            }
+
+            { // Magic shield
+                if (boss.magic_shield)
+                {
+                    // Visual effect
+                    float c = random_real_range(0, 1);
+                    w.AddParticle(fvec3(1, c, 0.5 + c/2), 0.3, 0.2, boss.pos + fvec2(random_real_range(2), random_real_range(2)), 0, 0, 0, random_real_range(75,80), 3);
+                    w.AddLight(fvec3(1,0.8,0.3)*2, boss.pos, 0, 0, 0, random_real_range(160,180), 2);
+
+                    if (!boss.magic_shield_broken)
+                    {
+                        // Kill player and push him
+                        fvec2 delta = w.p.pos - boss.pos;
+                        if (delta.len() < shield_rad)
+                        {
+                            KillPlayer();
+
+                            delta = delta.norm();
+                            fvec2 new_pos = boss.pos + (delta * (shield_rad + 1));
+                            if (!w.Solid(iround(new_pos), plr_hitbox))
+                                w.p.pos = new_pos;
+                            Sounds::stopped_by_shield(boss.pos);
+                            for (int i = 0; i < 2; i++)
+                            {
+                                float c = random_real_range(0.4,0.9);
+                                int sign = random_sign();
+                                w.AddParticle(fvec3(c), 0.5, 0.2, w.p.pos - delta*5 + fvec2(random_real_range(2), random_real_range(2)), delta.angle() - f_pi/2*sign, random_real(0.15)*sign,
+                                              random_real_range(2,3), random_real_range(4,6), random_real_range(20,40));
+                            }
+                        }
+
+                        // Deflect bullets
+                        for (auto &it : w.bullet_list)
+                        {
+                            fvec2 delta = boss.pos - it.pos;
+                            if (delta.len() > shield_rad)
+                                continue;
+                            if (it.vel /dot/ delta < 0)
+                                continue;
+                            delta = delta.norm();
+                            it.vel -= it.vel /dot/ delta * delta * 2;
+                            Sounds::stopped_by_shield(boss.pos);
+                        }
+                    }
+                }
+
+                // Visual effect for orbs
+                for (const auto &it : boss.magic_orb_list)
+                {
+                    float c = random_real_range(0, 1);
+                    w.AddParticle(fvec3(1, c, 0.5 + c/2), 0.3, 0.2, it.pos + fvec2(random_real_range(2), random_real_range(2)), 0, 0, 0, random_real_range(60,65), 3);
+                    w.AddLight(fvec3(1,0.8,0.3)*2, it.pos, 0, 0, 0, random_real_range(45,65), 2);
+                }
+            }
+
+            { // Invincibility frames
+                if (boss.invin)
+                    boss.invin--;
+            }
+
+            boss.phase_time++;
+        }
+
+        { // Dark force
+            if (w.enable_light)
+            {
+                fvec2 delta = w.p.Center() - w.BossHome();
+                float dist = delta.len();
+                bool out = dist > w.cur_light_rad;
+                if (out && w.dark_force_timer < 0.01)
+                    KillPlayer();
+                float angle = delta.angle();
+
+                // Update position
+                clamp_var(w.dark_force_timer += dark_force_step * (out ? -1 : 1));
+
+                // Add prticles
+                if (w.dark_force_timer < 1)
+                {
+                    float t = w.dark_force_timer;
+                    float d = max(dist, w.cur_light_rad);
+
+                    float max_a_offset = dark_force_max_dist / w.cur_light_rad;
+                    if (max_a_offset > f_pi)
+                        max_a_offset = f_pi;
+
+                    for (int s = -1; s <= 1; s += 2)
+                    {
+                        float a = angle + s*t*max_a_offset;
+                        fvec2 pos = w.dark_force_pos[s != -1] = w.BossHome() + fvec2::dir(a, d);
+                        for (int i = 0; i < 5; i++)
+                        {
+                            w.AddParticle(fvec3(0), 1-t, 1, pos + fvec2::dir(a, random_real_range(8)) + fvec2::dir(a+f_pi/2, random_real_range(8)),
+                                          random_real_range(f_pi), random_real_range(0.3), random_real_range(0,0.5), random_real_range(5,15), random_int_range(20,40));
+                        }
+                        w.AddLight(fvec3(1-t,0,0), pos, 0, 0, 0, random_real_range(100,120), 2);
+                    }
+                }
+            }
+        }
+
+        { // Bullets
+            auto it = w.bullet_list.begin();
+            while (it != w.bullet_list.end())
+            {
+                it->pos += it->vel;
+
+                // Change direction if homing
+                if (it->Homing() > 0 && !w.p.dead)
+                {
+                    float speed = it->vel.len();
+                    float angle = it->vel.angle();
+                    fvec2 target_dir = (w.p.Center() - it->pos).norm();
+                    fvec2 dir = it->vel.norm();
+                    float angle_delta = acos(dir /dot/ target_dir) * sign(dir /cross/ target_dir);
+                    if (abs(angle_delta) < it->Homing())
+                        angle = target_dir.angle();
+                    else
+                        angle += sign(angle_delta) * it->Homing();
+                    it->vel = fvec2::dir(angle, speed);
+                }
+
+                // Hit terrain
+                if (w.Solid(iround(it->pos), bullet_hitbox))
+                {
+                    it->DeathEffect(w);
+                    it = w.bullet_list.erase(it);
+                    continue;
+                }
+
+                // Kill player
+                if (!w.p.dead && it->Enemy() && (it->pos - w.p.Center()).len() < plr_hitbox_rad + it->CollisionRadius())
+                {
+                    it->DeathEffect(w);
+                    it = w.bullet_list.erase(it);
+                    KillPlayer();
+                    continue;
+                }
+
+                // Kill enemies
+                if (!it->Enemy())
+                {
+                    bool hit = 0;
+
+                    { // Crystals
+                        auto enemy = boss.crystal_list.begin();
+                        while (enemy != boss.crystal_list.end())
+                        {
+                            if ((enemy->pos - it->pos).len() < 14)
+                            {
+                                hit = 1;
+                                boss.crystals_wait = 0;
+                                w.enable_light = 1;
+
+                                if (enemy->invin == 0)
+                                {
+                                    enemy->invin = enemy_invin_frames;
+                                    enemy->hp--;
+
+                                    if (enemy->hp > 0)
+                                    {
+                                        Sounds::boss_hit(enemy->pos);
+                                    }
+                                    else
+                                    {
+                                        Sounds::boss_big_hit(enemy->pos);
+                                        for (int i = 0; i < 16; i++)
+                                        {
+                                            fvec3 c(1, random_real_range(0.2,1), 0);
+                                            w.AddParticle(c, 1, 0.5, enemy->pos + fvec2(random_real_range(1), random_real_range(1)), random_real_range(f_pi), random_real_range(0.2),
+                                                          random_real_range(1,3), random_real_range(18,24), random_int_range(10,35));
+                                        }
+                                        boss.crystal_list.erase(enemy);
+                                    }
+                                }
+
+                                break;
+                            }
+                            enemy++;
+                        }
+                    }
+
+                    // Orbs
+                    if (!hit)
+                    {
+                        auto enemy = boss.magic_orb_list.begin();
+                        while (enemy != boss.magic_orb_list.end())
+                        {
+                            if ((enemy->pos - it->pos).len() < 14)
+                            {
+                                hit = 1;
+
+                                if (enemy->invin == 0)
+                                {
+                                    enemy->invin = enemy_invin_frames;
+                                    enemy->hp--;
+
+                                    if (enemy->hp > 0)
+                                    {
+                                        Sounds::boss_hit(enemy->pos, 4);
+                                    }
+                                    else
+                                    {
+                                        if (boss.magic_orb_list.size() > 1) // The condition is here because otherwise this sound would interfere with some boss sound.
+                                            Sounds::boss_big_hit(enemy->pos);
+
+                                        for (int i = 0; i < 16; i++)
+                                        {
+                                            float c = random_real_range(0,1);
+                                            fvec3 color(1, 0.6+c*0.4, 0.2+c*0.8);
+                                            w.AddParticle(color, 1, 0.5, enemy->pos + fvec2(random_real_range(1), random_real_range(1)), random_real_range(f_pi), random_real_range(0.2),
+                                                          random_real_range(1,3), random_real_range(18,24), random_int_range(10,35));
+                                        }
+                                        boss.magic_orb_list.erase(enemy);
+                                    }
+                                }
+
+                                break;
+                            }
+                            enemy++;
+                        }
+                    }
+
+                    // Boss
+                    if (!hit)
+                    {
+                        if ((it->pos - boss.pos).len() < boss_hitbox_rad + it->CollisionRadius())
+                        {
+                            hit = 1;
+                            if (!boss.safe_shield && boss.invin == 0)
+                            {
+                                boss.invin = enemy_invin_frames;
+                                boss.hits_taken++;
+                            }
+                        }
+                    }
+
+                    if (hit)
+                    {
+                        it->DeathEffect(w);
+                        it = w.bullet_list.erase(it);
+                        continue;
+                    }
+                }
+
+                it++;
             }
         }
 
         { // Camera
-            fvec2 target = w.p.pos;
+            fvec2 target = w.p.Center();
             fvec2 delta = target - w.cam_pos;
             fvec2 dir = delta.norm();
             float dist = delta.len();
@@ -1010,6 +2116,22 @@ int main(int, char**)
             }
         }
 
+        { // Normal particles
+            auto it = w.particle_list.begin();
+            while (it != w.particle_list.end())
+            {
+                it->cur_life++;
+                if (it->cur_life > it->life)
+                {
+                    it = w.particle_list.erase(it);
+                    continue;
+                }
+                it->pos += fvec2::dir(it->dir, it->speed);
+                it->dir += it->av;
+                it++;
+            }
+        }
+
         { // Clouds
             constexpr int period = 2000;
             constexpr float speed = 1;
@@ -1017,11 +2139,63 @@ int main(int, char**)
             w.cloud_offset += fvec2::dir(angle, speed);
         }
 
-        { // Make light particles
-            float d = (w.map.BossTile() * tile_size + tile_size/2 - w.p.pos).len();
-            float f = d / 80;
-            float ra = random_real_range(f_pi);
-            w.AddLight((fvec3(sin(ra), sin(ra+f_pi*2/3), sin(ra-f_pi*2/3))*0.5+0.5) * 0.96 + 0.05, w.map.BossTile() * tile_size + tile_size/2, random_real_range(f_pi), random_real_range(0.1), random_real_range(0,0.25+sqrt(f*4)), random_real_range(10, 100)*f+30, random_int_range(0, 40)*f+20);
+        { // Light circle
+            // Change radius
+            w.cur_light_rad -= (w.cur_light_rad - w.target_light_rad) * 0.01;
+
+            // Particles
+            if (w.enable_light)
+            {
+                float d = w.cur_light_rad;
+                float f = max(0, d-32) / 90;
+                float ra = random_real_range(f_pi);
+                w.AddLight((fvec3(sin(ra), sin(ra+f_pi*2/3), sin(ra-f_pi*2/3))*0.5+0.5) * 0.96 + 0.05, w.BossHome(), random_real_range(f_pi), random_real_range(0.1), random_real_range(0,0.25+sqrt(f*6)), random_real_range(10, 100)*f+30, random_int_range(0, 40)*f+20);
+            }
+        }
+
+        { // Respawn
+            if (w.p.dead && w.p.death_timer > 20 && Interface::Button().AssignKey())
+                w.p.respawning = 1;
+        }
+
+        { // Screen transition timer
+            if (!w.p.respawning)
+            {
+                if (w.darkness > 0)
+                {
+                    w.darkness -= scr_transition_step;
+                    if (w.darkness < 0)
+                        w.darkness = 0;
+                }
+            }
+            else
+            {
+                if (w.darkness < 1)
+                {
+                    w.darkness += scr_transition_step_fast;
+                    if (w.darkness > 1)
+                    {
+                        w = saved_world;
+                    }
+                }
+            }
+
+            w.whiteness = w.whiteness * 0.95 - 0.001;
+            if (w.whiteness < 0)
+                w.whiteness = 0;
+        }
+
+        { // Cheats
+            if (Interface::Button(Interface::Inputs::f1).pressed())
+            {
+                w.b.crystal_list.clear();
+                w.b.magic_orb_list.clear();
+                w.enable_light = 1;
+            }
+            if (Interface::Button(Interface::Inputs::f2).pressed())
+            {
+                w.b.hits_taken = 3;
+            }
         }
     };
 
@@ -1032,8 +2206,159 @@ int main(int, char**)
         }
 
         { // Player
+            float alpha = max(0, 1 - w.p.death_timer / 10.);
+
             constexpr ivec2 size(32);
-            Quad(iround(w.p.pos - size/2).sub_y(8) - w.cam_pos_i, size, Src4(ivec2(0,128).add_x(size.x * (w.p.anim_state * 4 + w.p.anim_frame)), size));
+            // Alive
+            Quad(iround(w.p.pos - size/2).sub_y(8) - w.cam_pos_i, size, Src4(ivec2(0,128).add_x(size.x * (w.p.anim_state * 4 + w.p.anim_frame)), size, alpha));
+
+            // Dead
+            if (w.p.dead)
+                Quad(iround(w.p.pos - size/2).sub_y(8) - w.cam_pos_i, size, Src4(ivec2(0,128+32), size, 1-alpha));
+
+            // Dash glow
+            if (w.p.dash_len)
+                Quad(ivec2(w.p.Center() - size/2) - w.cam_pos_i, size, Src4(ivec2(96,96), size, 1, 0.5));
+        }
+
+        { // Boss
+            auto &boss = w.b;
+
+            // Crystals
+            for (const auto &it : boss.crystal_list)
+            {
+                constexpr ivec2 size(64);
+                // Shadow
+                Quad(it.pos - size/2 - w.cam_pos_i, size, Src4(ivec2(160,0), size));
+                // Body
+                ivec2 body_pos = it.pos.add_y(iround(sin(metronome.ticks % crystal_anim_period / float(crystal_anim_period) * 2 * f_pi) * crystal_anim_offset));
+                Quad(body_pos - size/2 - w.cam_pos_i, size, Src4(ivec2(96,0), size));
+                // Effect
+                float sz = random_real_range(1,1.06);
+                Quad(body_pos - size/2 - w.cam_pos_i + iround(fvec2(random_real_range(1.4), random_real_range(1.4))) - size*(sz-1)/2, size*sz, Src4(ivec2(96,0)+2, size-4, 0.5, 0.2));
+            }
+
+            { // Safe shield
+                if (boss.safe_shield)
+                {
+                    constexpr ivec2 size(96);
+                    float s = random_real_range(0.95,1.05);
+                    Quad(iround(boss.pos) - size/2*s - w.cam_pos_i, size*s, Src4(ivec2(0,288)+1, size-2, 0.9, 0.2));
+                }
+            }
+
+            { // Magic shield
+                if (boss.magic_shield)
+                {
+                    constexpr ivec2 size(96);
+
+                    if (!boss.magic_shield_broken)
+                    {
+                        float s = random_real_range(0.98,1.03);
+                        Quad(iround(boss.pos) - size/2*s - w.cam_pos_i, size*s, Src4(ivec2(96,288)+1, size-2, 0.9, 0.2));
+                    }
+
+                    constexpr int period = 300;
+                    fvec2 d = fvec2::dir(f_pi*4*sin(int(metronome.ticks % period) / float(period) * f_pi * 2), size.x/2);
+                    Quad(iround(boss.pos) - d - d.rot90() - w.cam_pos_i, d*2, d.rot90()*2, Src4(ivec2(194,288)+2, size-4, 0.9, 0.2));
+                }
+            }
+
+            { // Magic orbs
+                for (const auto &it : boss.magic_orb_list)
+                {
+                    constexpr ivec2 size(32-2);
+                    float s = random_real_range(0.94,1.06);
+                    Quad(iround(it.pos) - size/2*s - w.cam_pos_i, size*s, Src4(ivec2(160+1,96+1), size, 0.9, 0.2));
+                }
+            }
+
+            { // Dash target
+                if (boss.phase == Boss::Phase::magic)
+                {
+                    constexpr ivec2 size(96);
+                    float s = random_real_range(0.98,1.03);
+                    Quad(iround(boss.mgc_target) - size/2*s - w.cam_pos_i, size*s, Src4(ivec2(0,384)+1, size-2, 0.9, 0.2));
+                }
+            }
+
+            { // Laser
+                if (boss.first_enable_laser)
+                {
+                    bool deadly = boss.first_laser_deadly;
+
+                    float width = (deadly ? 8 : 1);
+
+                    fvec2 dir = fvec2::dir(boss.first_laser_angle);
+                    fvec2 n = dir.rot90();
+                    float len = boss.first_laser_len;
+
+                    fvec4 color = (deadly ? fvec4(1,0.5,0.2,1) : fvec4(1,0.5,0.5,1));
+                    for (int i = 0; i < (deadly ? 3 : 1); i++)
+                    {
+                        Quad(boss.pos + dir * boss_laser_offset - n * width/2 - w.cam_pos, dir * (len - boss_laser_offset), n * width, Src4(color, deadly ? 0 : 0.5));
+                        width -= 2;
+                    }
+                }
+            }
+
+            { // Body
+                constexpr ivec2 size(64);
+                Quad(iround(boss.pos) - size/2 - w.cam_pos_i, size, Src4(ivec2(0,224), size));
+            }
+        }
+
+        { // Bullets
+            for (const auto &bullet : w.bullet_list)
+                bullet.Render(w.cam_pos_i);
+        }
+
+        { // Particles
+            for (const auto &it : w.particle_list)
+            {
+                constexpr int size = 64, m = 4;
+                float s = (1 - it.cur_life / float(it.life));
+                float sz = s * it.size;
+                Quad(it.pos - w.cam_pos - sz/2, fvec2(sz), Src4(0, it.color, ivec2(224,0)+m, ivec2(size-m*2), it.alpha, it.beta));
+            }
+        }
+
+        { // Dark force
+            if (w.enable_light && w.dark_force_timer < 1)
+            {
+                constexpr ivec2 size(32);
+                float alpha = clamp((1-w.dark_force_timer) * 2);
+                for (int i = 0; i < 2; i++)
+                    Quad(w.dark_force_pos[i] - size/2 - w.cam_pos_i, size, Src4(ivec2(128,96), size, alpha, 1));
+            }
+        }
+
+        { // Death GUI
+            if (w.p.dead)
+            {
+                float alpha = clamp((w.p.death_timer-60) / 10.);
+                constexpr ivec2 size(176,32);
+
+                // "You have failed"
+                Quad(-size/2 + ivec2(0,-50), size, Src4(ivec2(0, 192), size, alpha));
+
+                // A funny message
+                ivec2 msg_pos(0, 40);
+                std::string msg = death_messages[w.p.death_msg_index];
+//                for (int i = 0; i < 4; i++)
+//                {
+//                    Text<0>(msg_pos + ivec2(1,0).rot90(i), msg, fvec3(0.75), alpha);
+//                }
+                Text<0>(msg_pos, msg, fvec3(0), alpha);
+            }
+        }
+
+        { // Screen transition
+            if (w.darkness > 0)
+                Quad(-screen_sz/2, screen_sz, Src4(fvec4(0,0,0,smoothstep(w.darkness))));
+
+            if (w.whiteness > 0)
+                Quad(-screen_sz/2, screen_sz, Src4(fvec4(1,1,1,smoothstep(w.whiteness) * 0.5)));
         }
     };
 
@@ -1047,6 +2372,11 @@ int main(int, char**)
 
     auto Light = [&]
     {
+        // Bullets
+        for (const auto &bullet : w.bullet_list)
+            Draw::Light(bullet.pos - w.cam_pos, bullet.LightSize(), bullet.LightColor());
+
+        // Light particles
         for (const auto &li : w.light_list)
             Draw::Light(li.pos - w.cam_pos, li.size * (1 - li.cur_life / float(li.life)), li.color);
     };
@@ -1056,6 +2386,9 @@ int main(int, char**)
     Draw::Resize();
 
     uint64_t frame_start = Clock::Time();
+
+    // Without this line window resize breaks. Ugh.
+    w.AddLight(fvec3(0), fvec2(0), 0, 0, 0, 0, 1);
 
     while (1)
     {
@@ -1110,7 +2443,8 @@ int main(int, char**)
         Draw::ShaderLightApply::shader.Bind();
 
         Graphics::Blending::Func(Graphics::Blending::dst, Graphics::Blending::zero);
-        Draw::FullscreenQuad();
+        if (w.enable_light)
+            Draw::FullscreenQuad();
         Graphics::Blending::FuncNormalPre();
 
         // Move objects onto background

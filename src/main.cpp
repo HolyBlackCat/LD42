@@ -1,6 +1,7 @@
 #include "master.h"
 
 #include <deque>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -9,17 +10,22 @@
 
 Program::Parachute error_parachute;
 
+constexpr bool debug_mode = 0;
+bool fullscreen = !debug_mode;
+
 constexpr ivec2 screen_sz = ivec2(1920,1080)/4;
 Interface::Window win("The last witch-knight", screen_sz*2, Interface::Window::windowed, Interface::Window::Settings{}.MinSize(screen_sz));
 Audio::Context audio;
 Metronome metronome;
 Interface::Mouse mouse;
 
+
 constexpr ivec2 tile_size = ivec2(16,16);
 
 namespace Sounds
 {
     #define SOUND_LIST \
+        SOUND( click              , 0.3  ) \
         SOUND( player_shoots      , 0.3  ) \
         SOUND( death              , 0.3  ) \
         SOUND( crystal_shoots     , 0.3  ) \
@@ -56,21 +62,29 @@ namespace Sounds
 
     #undef SOUND_LIST
 
-//    Audio::Buffer theme_buf;
-//    Audio::Source theme;
-//    constexpr float theme_vol = 1/9.;
-//    bool theme_enabled = 1;
-//
+    Audio::Buffer theme_buf;
+    Audio::Source theme;
+    constexpr float theme_vol = 0.3;
+
     void Init()
     {
         Audio::Source::DefaultRefDistance(200);
         Audio::Source::DefaultRolloffFactor(1);
-        Audio::Volume(3);
+        Audio::Volume(6);
 
-//        theme_buf.Create();
-//        theme_buf.SetData(Audio::Sound::OGG("assets/theme.ogg"));
-//        theme.Create(theme_buf);
-//        theme.loop(1).volume(theme_vol).play();
+        bool have_theme_file = 1;
+        {
+            std::ifstream test("assets/theme.ogg");
+            if (!test)
+                have_theme_file = 0;
+        }
+
+        if (have_theme_file)
+        {
+            theme_buf.SetData(Audio::Sound::OGG("assets/theme.ogg"));
+            theme.Create(theme_buf);
+            theme.loop(1).volume(theme_vol).play().relative();
+        }
     }
 }
 
@@ -1158,6 +1172,8 @@ struct World
 
 int death_counter = 0;
 int min_y = 9000;
+bool game_started = 0;
+uint64_t game_timer = 0;
 
 int main(int, char**)
 {
@@ -1188,13 +1204,37 @@ int main(int, char**)
         "Wanna try again?",
     };
 
+    mouse.HideCursor();
+
     World w;
     w.LoadMap("map.txt");
 
     World saved_world = w;
 
+    if (fullscreen)
+        win.SetMode(Interface::Window::fullscreen);
+
     auto Tick = [&]
     {
+        { // Meta
+            if (Interface::Button(Interface::Inputs::f11).pressed())
+            {
+                fullscreen = !fullscreen;
+                win.SetMode(fullscreen ? Interface::Window::fullscreen : Interface::Window::windowed);
+            }
+
+            if (!game_started && metronome.ticks > 30 && Interface::Button().AssignKey())
+            {
+                game_started = 1;
+                Sounds::click(w.p.pos);
+            }
+
+            if (!game_started)
+                return;
+
+            game_timer++;
+        }
+
         auto &boss = w.b;
         min_y = min(min_y, w.p.pos.y);
 
@@ -1235,7 +1275,7 @@ int main(int, char**)
         { // Map
             w.map.Tick(w.cam_pos_i);
 
-            if (Interface::Button(Interface::Inputs::grave).pressed())
+            if (debug_mode && Interface::Button(Interface::Inputs::grave).pressed())
                 w.map.enable_editor = !w.map.enable_editor;
         }
 
@@ -2235,15 +2275,18 @@ int main(int, char**)
         }
 
         { // Cheats
-            if (Interface::Button(Interface::Inputs::f1).pressed())
+            if (debug_mode)
             {
-                w.b.crystal_list.clear();
-                w.b.magic_orb_list.clear();
-                w.enable_light = 1;
-            }
-            if (Interface::Button(Interface::Inputs::f2).pressed())
-            {
-                w.b.hits_taken = 3;
+                if (Interface::Button(Interface::Inputs::f1).pressed())
+                {
+                    w.b.crystal_list.clear();
+                    w.b.magic_orb_list.clear();
+                    w.enable_light = 1;
+                }
+                if (Interface::Button(Interface::Inputs::f2).pressed())
+                {
+                    w.b.hits_taken = 3;
+                }
             }
         }
     };
@@ -2448,8 +2491,10 @@ int main(int, char**)
             };
 
             Message(1, 0, -4, Str("Use arrows to move\n",
-                             w.button_fire.Name(), " to shoot\n",
-                             w.button_dash.Name(), " to dash"));
+                                  w.button_fire.Name(), " to shoot\n",
+                                  w.button_dash.Name(), " to dash\n"
+                                  "\n"
+                                  "F11 toggles fullscreen"));
             Message(1, 116, -40, "Dashing makes you invulnerable\n"
                                  "and allows you to destroy projectiles");
 
@@ -2463,6 +2508,19 @@ int main(int, char**)
 
             if (w.whiteness > 0)
                 Quad(-screen_sz/2, screen_sz, Src4(fvec4(1,1,1,smoothstep(w.whiteness) * 0.5)));
+        }
+
+        { // Start of game gui
+            if (game_timer < 300)
+            {
+                float t = game_timer / 5.;
+                int y = iround(t*t);
+                Quad(ivec2(0,y)-screen_sz/2, screen_sz, Src4(fvec4(0,0,0,1)));
+                Text<0>(ivec2(0,y+screen_sz.y*1/3.  ).sub_y(screen_sz.y/2), "The last witch-knight", fvec3(1));
+                Text<0>(ivec2(0,y+screen_sz.y*2/3   ).sub_y(screen_sz.y/2), "Press any key to start", fvec3(91,110,255)/255);
+                Text<0>(ivec2(0,y                   ).sub_y(screen_sz.y/2), "If you don't like the ambient sound, delete \"assets/theme.ogg\" and restart", fvec3(34,32,52)/255);
+                Text<0>(ivec2(0,y+screen_sz.y-16    ).sub_y(screen_sz.y/2), "A game by HolyBlackCat (blckcat@inbox.ru), made for LD #42. August 11-13, 2018", fvec3(34,32,52)/255);
+            }
         }
     };
 

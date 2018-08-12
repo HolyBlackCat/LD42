@@ -7,7 +7,7 @@
 		<Option compiler="gcc" />
 		<Build>
 			<Target title="Debug">
-				<Option output="bin/LD42" prefix_auto="1" extension_auto="1" />
+				<Option output="bin/LD42_The_last_witch-knight" prefix_auto="1" extension_auto="1" />
 				<Option working_dir="bin/" />
 				<Option object_output="obj/" />
 				<Option type="1" />
@@ -19,7 +19,7 @@
 				</Compiler>
 			</Target>
 			<Target title="Release">
-				<Option output="bin/LD42" prefix_auto="1" extension_auto="1" />
+				<Option output="bin/LD42_The_last_witch-knight" prefix_auto="1" extension_auto="1" />
 				<Option working_dir="bin/" />
 				<Option object_output="obj/" />
 				<Option type="0" />
@@ -35,7 +35,7 @@
 				</Linker>
 			</Target>
 			<Target title="Debug (OpenGL logs)">
-				<Option output="bin/LD42" prefix_auto="1" extension_auto="1" />
+				<Option output="bin/LD42_The_last_witch-knight" prefix_auto="1" extension_auto="1" />
 				<Option working_dir="bin/" />
 				<Option object_output="obj/" />
 				<Option type="1" />
@@ -78,6 +78,9 @@
 			<Option link="0" />
 			<Option weight="100" />
 			<Option compiler="gcc" use="1" buildCommand="gen\make_mat_h.bat\ngen\touch.bat $object" />
+		</Unit>
+		<Unit filename="icon.rc">
+			<Option compilerVar="WINDRES" />
 		</Unit>
 		<Unit filename="lib/glfl.cpp">
 			<Option compiler="gcc" use="1" buildCommand="$compiler $options $includes -c $file -o $object -g0 -O3" />

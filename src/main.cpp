@@ -1,5 +1,6 @@
 #include "master.h"
 
+#include <deque>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -60,13 +61,24 @@ namespace Sounds
 namespace Draw
 {
     Graphics::Texture texture_main;
-    Graphics::TextureUnit texture_unit_main = Graphics::TextureUnit(texture_main).Interpolation(Graphics::linear).SetData(Graphics::Image("assets/texture.png"));
+    Graphics::TextureUnit texture_unit_main = Graphics::TextureUnit(texture_main).Interpolation(Graphics::linear).Wrap(Graphics::clamp).SetData(Graphics::Image("assets/texture.png"));
 
-    Graphics::Texture fbuf_scale_tex, fbuf_scale_tex2;
+    Graphics::Texture texture_light;
+    Graphics::TextureUnit texture_unit_light = Graphics::TextureUnit(texture_light).Interpolation(Graphics::nearest).Wrap(Graphics::clamp).SetData(screen_sz);
+    Graphics::FrameBuffer fbuf_light(texture_light);
+
+    Graphics::Texture texture_dither;
+    Graphics::TextureUnit texture_unit_dither = Graphics::TextureUnit(texture_dither).Interpolation(Graphics::linear).Wrap(Graphics::repeat).SetData(Graphics::Image("assets/dither.png"));
+
+    Graphics::Texture fbuf_scale_tex;
     Graphics::TextureUnit fbuf_scale_tex_unit = Graphics::TextureUnit(fbuf_scale_tex).Interpolation(Graphics::nearest).Wrap(Graphics::clamp).SetData(screen_sz);
-    Graphics::TextureUnit fbuf_scale_tex_unit2 = Graphics::TextureUnit(fbuf_scale_tex2).Interpolation(Graphics::linear).Wrap(Graphics::clamp);
     Graphics::FrameBuffer fbuf_scale(fbuf_scale_tex);
+    Graphics::Texture fbuf_scale_tex2;
+    Graphics::TextureUnit fbuf_scale_tex_unit2 = Graphics::TextureUnit(fbuf_scale_tex2).Interpolation(Graphics::linear).Wrap(Graphics::clamp);
     Graphics::FrameBuffer fbuf_scale2(fbuf_scale_tex2);
+    Graphics::Texture fbuf_scale_tex_bg;
+    Graphics::TextureUnit fbuf_scale_tex_unit_bg = Graphics::TextureUnit(fbuf_scale_tex_bg).Interpolation(Graphics::nearest).Wrap(Graphics::clamp).SetData(screen_sz);
+    Graphics::FrameBuffer fbuf_scale_bg(fbuf_scale_tex_bg);
 
     float scale_factor = 1;
     int scale_factor_int = 1;
@@ -137,7 +149,7 @@ namespace Draw
         };
         uniforms_t uniforms;
 
-        Graphics::Shader::Program shader("Identity", {}, {}, Meta::tag<attribs_t>{}, uniforms,
+        Graphics::Shader::Program shader("Main", {}, {}, Meta::tag<attribs_t>{}, uniforms,
         //{
         R"(
         varying vec4 v_color;
@@ -172,6 +184,102 @@ namespace Draw
         );
     }
 
+    namespace ShaderLight
+    {
+        struct attribs_t
+        {
+            Reflect(attribs_t)
+            (
+                (fvec2)(pos),
+                (fvec3)(color),
+                (fvec2)(texcoord),
+            )
+        };
+        struct uniforms_t
+        {
+            Reflect(uniforms_t)
+            (
+                (Graphics::Shader::VertUniform<fmat4>)(matrix),
+                (Graphics::Shader::VertUniform<fvec2>)(tex_size),
+                (Graphics::Shader::FragUniform<Graphics::TextureUnit>)(texture),
+            )
+        };
+        uniforms_t uniforms;
+
+        Graphics::Shader::Program shader("Light", {}, {}, Meta::tag<attribs_t>{}, uniforms,
+        //{
+        R"(
+        varying vec3 v_color;
+        varying vec2 v_texcoord;
+        void main()
+        {
+            v_color = a_color;
+            v_texcoord = a_texcoord / u_tex_size;
+            gl_Position = u_matrix * vec4(a_pos, 0, 1);
+        }
+        )" //}
+        ,
+        //{
+        R"(
+        varying vec3 v_color;
+        varying vec2 v_texcoord;
+        void main()
+        {
+            gl_FragColor = vec4(texture2D(u_texture, v_texcoord).rgb * v_color, 1);
+        }
+        )"
+        //}
+        );
+    }
+
+    namespace ShaderLightApply
+    {
+        struct attribs_t
+        {
+            Reflect(attribs_t)
+            (
+                (fvec2)(pos),
+                (fvec2)(texcoord),
+            )
+        };
+        struct uniforms_t
+        {
+            Reflect(uniforms_t)
+            (
+                (Graphics::Shader::FragUniform<Graphics::TextureUnit>)(texture),
+                (Graphics::Shader::FragUniform<Graphics::TextureUnit>)(dither),
+            )
+        };
+        uniforms_t uniforms;
+
+        Graphics::Shader::Program shader("LightApply", {}, {}, Meta::tag<attribs_t>{}, uniforms,
+        //{
+        R"(
+        varying vec2 v_texcoord;
+        void main()
+        {
+            v_texcoord = a_texcoord;
+            gl_Position = vec4(a_pos, 0, 1);
+        }
+        )" //}
+        ,
+        //{
+        R"(
+        varying vec2 v_texcoord;
+        void main()
+        {
+            vec3 light = texture2D(u_texture, v_texcoord).rgb;
+            vec3 dither = texture2D(u_dither, gl_FragCoord.xy/8./4.).rgb;
+            const float step = 1. / 4.;
+            light += (dither - 0.5) * step;
+            light = round(light / step) * step;
+            gl_FragColor = vec4(light, 1);
+        }
+        )"
+        //}
+        );
+    }
+
     void FullscreenQuad(fvec2 size = fvec2(1))
     {
         using Attribs = ShaderIdentity::attribs_t;
@@ -194,7 +302,7 @@ namespace Draw
     {
         using Attribs = ShaderMain::attribs_t;
         std::vector<Attribs> array;
-        constexpr int size = 9;
+        constexpr int size = 3000;
         static_assert(size % 3 == 0);
 
         void Flush()
@@ -202,8 +310,6 @@ namespace Draw
             static Graphics::VertexBuffer<Attribs> buffer(size);
             buffer.SetDataPart(0, array.size(), array.data());
             buffer.Draw(Graphics::triangles, array.size());
-//        std::cout << Refl::Interface(array).to_string() << '\n';
-//        Program::Exit();
             array.clear();
         }
 
@@ -212,6 +318,28 @@ namespace Draw
             if (array.size() >= size)
                 Flush();
             array.push_back({pos, color, texcoord, factors});
+        }
+    }
+    namespace LightQueue
+    {
+        using Attribs = ShaderLight::attribs_t;
+        std::vector<Attribs> array;
+        constexpr int size = 3000;
+        static_assert(size % 3 == 0);
+
+        void Flush()
+        {
+            static Graphics::VertexBuffer<Attribs> buffer(size);
+            buffer.SetDataPart(0, array.size(), array.data());
+            buffer.Draw(Graphics::triangles, array.size());
+            array.clear();
+        }
+
+        void Push(fvec2 pos, fvec3 color, fvec2 texcoord)
+        {
+            if (array.size() >= size)
+                Flush();
+            array.push_back({pos, color, texcoord});
         }
     }
 
@@ -299,6 +427,25 @@ namespace Draw
         }
     }
 
+    void Light(fvec2 pos, float rad, fvec3 color)
+    {
+        constexpr int m = 8; // Margin.
+        LightQueue::Push(pos + fvec2(-rad, -rad), color, fvec2(m    ,1024+m    ));
+        LightQueue::Push(pos + fvec2(+rad, -rad), color, fvec2(512-m,1024+m    ));
+        LightQueue::Push(pos + fvec2(-rad, +rad), color, fvec2(m    ,1024-m+512));
+        LightQueue::Push(pos + fvec2(-rad, +rad), color, fvec2(m    ,1024-m+512));
+        LightQueue::Push(pos + fvec2(+rad, -rad), color, fvec2(512-m,1024+m    ));
+        LightQueue::Push(pos + fvec2(+rad, +rad), color, fvec2(512-m,1024-m+512));
+    }
+
+    void Background(int index, ivec2 offset)
+    {
+        offset = mod_ex(offset, screen_sz);
+        for (int y = -1; y <= 0; y++)
+        for (int x = -1; x <= 0; x++)
+            Quad(ivec2(x,y)*screen_sz - screen_sz/2 + offset, screen_sz, Src4(ivec2(544,754 - screen_sz.y * index), screen_sz));
+    }
+
     constexpr fmat4 view_mat = fmat4::ortho(screen_sz / ivec2(-2,2), screen_sz / ivec2(2,-2), -1, 1);
 
 
@@ -308,6 +455,13 @@ namespace Draw
         ShaderMain::uniforms.tex_size = texture_main.Size();
         ShaderMain::uniforms.texture = Draw::texture_unit_main;
         ShaderMain::uniforms.color_matrix = fmat4();
+
+        ShaderLight::uniforms.matrix = view_mat;
+        ShaderLight::uniforms.tex_size = texture_main.Size();
+        ShaderLight::uniforms.texture = Draw::texture_unit_main;
+
+        ShaderLightApply::uniforms.texture = Draw::texture_unit_light;
+        ShaderLightApply::uniforms.dither = Draw::texture_unit_dither;
 
         Queue::array.reserve(Queue::size);
 
@@ -397,7 +551,7 @@ class Map
     (
         (ivec2)(size)(=ivec2(0)),
         (optional)(std::vector<Tile>)(tiles,tiles_back, tiles_shadow)(),
-        (optional)(ivec2)(spawn_tile)(=ivec2(0)),
+        (optional)(ivec2)(spawn_tile, boss_tile)(=ivec2(0)),
     )
 
     inline static constexpr std::vector<Tile> Map::*layers[] = {&Map::tiles_back, &Map::tiles_shadow, &Map::tiles};
@@ -427,7 +581,8 @@ class Map
             b_mod_hkey  = Btn(Inp::l_ctrl),
             b_save      = Btn(Inp::s),
             b_load      = Btn(Inp::space),
-            b_set_spawn = Btn(Inp::_1);
+            b_set_spawn = Btn(Inp::_1),
+            b_set_boss  = Btn(Inp::_2);
 
         ivec2 cursor = ivec2(0);
         int cur_index = 0;
@@ -490,6 +645,7 @@ class Map
     }
 
     ivec2 SpawnTile() const {return spawn_tile;}
+    ivec2 BossTile() const {return boss_tile;}
 
     ivec2 PixelToTile(ivec2 pix)
     {
@@ -521,9 +677,9 @@ class Map
             // Get tile pos
             editor.cursor = PixelToTile(mouse.pos() + cam_pos);
 
-            // Set spawn
-            if (editor.b_set_spawn.pressed())
-                spawn_tile = editor.cursor;
+            // Set locations
+            if (editor.b_set_spawn.pressed()) spawn_tile = editor.cursor;
+            if (editor.b_set_boss.pressed()) boss_tile = editor.cursor;
 
             // Change layer index
             if (editor.b_prev_la.repeated() && editor.cur_layer > 0)
@@ -630,6 +786,9 @@ class Map
             Text(-screen_sz/2, Str("Layer:   ", editor.cur_layer, "\n"
                                    "Tile:    ", editor.cur_index, " ", Tiles::Info(editor.cur_tile).name, "\n"
                                    "Variant: ", editor.cur_variant, "\n"), ivec3(1));
+
+            Text(spawn_tile * tile_size + tile_size/2 - cam_pos - ivec2(0,7), "<- spawn", fvec3(0,0,1));
+            Text(boss_tile * tile_size + tile_size/2 - cam_pos - ivec2(0,7), "<- boss", fvec3(0,0,1));
         }
     }
 };
@@ -662,7 +821,37 @@ struct World
     fvec2 cam_vel = fvec2(0);
     fvec2 cam_pos_i = fvec2(0);
 
+    fvec2 cloud_offset = fvec2(0);
+
     Map map;
+
+
+    struct Light
+    {
+        fvec3 color;
+        fvec2 pos;
+        float dir, av;
+        float speed;
+        float size;
+        int life;
+        int cur_life = 0;
+    };
+
+    std::deque<Light> light_list;
+
+    void AddLight(fvec3 color, fvec2 pos, float dir, float av, float speed, float size, int life)
+    {
+        Light tmp;
+        tmp.color = color;
+        tmp.pos = pos;
+        tmp.dir = dir;
+        tmp.av = av;
+        tmp.speed = speed;
+        tmp.size = size;
+        tmp.life = life;
+        light_list.push_back(tmp);
+    }
+
 
     void LoadMap(std::string name)
     {
@@ -804,6 +993,36 @@ int main(int, char**)
             w.cam_pos += w.cam_vel;
             w.cam_pos_i = iround(w.cam_pos);
         }
+
+        { // Light particles
+            auto it = w.light_list.begin();
+            while (it != w.light_list.end())
+            {
+                it->cur_life++;
+                if (it->cur_life > it->life)
+                {
+                    it = w.light_list.erase(it);
+                    continue;
+                }
+                it->pos += fvec2::dir(it->dir, it->speed);
+                it->dir += it->av;
+                it++;
+            }
+        }
+
+        { // Clouds
+            constexpr int period = 2000;
+            constexpr float speed = 1;
+            float angle = sin(metronome.ticks % period / float(period) * 2 * f_pi) * 0.55;
+            w.cloud_offset += fvec2::dir(angle, speed);
+        }
+
+        { // Make light particles
+            float d = (w.map.BossTile() * tile_size + tile_size/2 - w.p.pos).len();
+            float f = d / 80;
+            float ra = random_real_range(f_pi);
+            w.AddLight((fvec3(sin(ra), sin(ra+f_pi*2/3), sin(ra-f_pi*2/3))*0.5+0.5) * 0.96 + 0.05, w.map.BossTile() * tile_size + tile_size/2, random_real_range(f_pi), random_real_range(0.1), random_real_range(0,0.25+sqrt(f*4)), random_real_range(10, 100)*f+30, random_int_range(0, 40)*f+20);
+        }
     };
 
     auto Render = [&]
@@ -816,6 +1035,20 @@ int main(int, char**)
             constexpr ivec2 size(32);
             Quad(iround(w.p.pos - size/2).sub_y(8) - w.cam_pos_i, size, Src4(ivec2(0,128).add_x(size.x * (w.p.anim_state * 4 + w.p.anim_frame)), size));
         }
+    };
+
+    auto Background = [&]
+    {
+        ivec2 v = iround(w.cloud_offset - w.cam_pos / 2);
+        Draw::Background(0, iround(v / 10.));
+        Draw::Background(1, iround(v / 4.));
+        Draw::Background(2, iround(v / 2.));
+    };
+
+    auto Light = [&]
+    {
+        for (const auto &li : w.light_list)
+            Draw::Light(li.pos - w.cam_pos, li.size * (1 - li.cur_life / float(li.life)), li.color);
     };
 
     Sounds::Init();
@@ -844,23 +1077,60 @@ int main(int, char**)
             Audio::Source::RemoveUnused();
         }
 
-        Draw::fbuf_scale.Bind();
+        // Render in original scale
+        // - Background
+        Draw::fbuf_scale_bg.Bind();
         Graphics::Viewport(screen_sz);
         Draw::ShaderMain::shader.Bind();
 
         Graphics::Clear();
+        Background();
+        Draw::Queue::Flush();
+
+        // - Everything else
+        Draw::fbuf_scale.Bind();
+
+        Graphics::SetClearColor(fvec4(0));
+        Graphics::Clear();
+        Graphics::SetClearColor(fvec3(0));
         Render();
         Draw::Queue::Flush();
 
-        Draw::fbuf_scale2.Bind();
-        Graphics::Viewport(screen_sz * Draw::scale_factor_int);
+        // Render light
+        Draw::fbuf_light.Bind();
+        Draw::ShaderLight::shader.Bind();
 
+        Graphics::Clear();
+        Graphics::Blending::FuncAdd();
+        Light();
+        Draw::LightQueue::Flush();
+
+        // Apply light
+        Draw::fbuf_scale.Bind();
+        Draw::ShaderLightApply::shader.Bind();
+
+        Graphics::Blending::Func(Graphics::Blending::dst, Graphics::Blending::zero);
+        Draw::FullscreenQuad();
+        Graphics::Blending::FuncNormalPre();
+
+        // Move objects onto background
+        Draw::fbuf_scale_bg.Bind();
+        Graphics::Viewport(screen_sz);
         Draw::ShaderIdentity::shader.Bind();
         Draw::ShaderIdentity::uniforms.texture = Draw::fbuf_scale_tex_unit;
+
+        Draw::FullscreenQuad();
+
+        // Upscale 1, to framebuffer
+        Draw::fbuf_scale2.Bind();
+        Graphics::Viewport(screen_sz * Draw::scale_factor_int);
+        Draw::ShaderIdentity::shader.Bind();
+        Draw::ShaderIdentity::uniforms.texture = Draw::fbuf_scale_tex_unit_bg;
 
         Graphics::Clear();
         Draw::FullscreenQuad();
 
+        // Upscale 2, to screen
         Graphics::FrameBuffer::BindDefault();
         Graphics::Viewport(win.Size());
         Draw::ShaderIdentity::uniforms.texture = Draw::fbuf_scale_tex_unit2;

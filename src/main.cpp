@@ -10,7 +10,7 @@
 Program::Parachute error_parachute;
 
 constexpr ivec2 screen_sz = ivec2(1920,1080)/4;
-Interface::Window win("Alpha", screen_sz*2, Interface::Window::windowed, Interface::Window::Settings{}.MinSize(screen_sz));
+Interface::Window win("The last witch-knight", screen_sz*2, Interface::Window::windowed, Interface::Window::Settings{}.MinSize(screen_sz));
 Audio::Context audio;
 Metronome metronome;
 Interface::Mouse mouse;
@@ -36,6 +36,7 @@ namespace Sounds
         SOUND( boss_charges       , 0.3  ) \
         SOUND( boss_laser         , 0.3  ) \
         SOUND( boss_dash          , 0.3  ) \
+        SOUND( boss_dies          , 0.3  ) \
 
     namespace Buffers
     {
@@ -878,6 +879,7 @@ struct Boss
         first,
         more_crystals,
         magic,
+        fin,
     };
 
     Phase phase = Phase::crystals;
@@ -907,6 +909,9 @@ struct Boss
     fvec2 mgc_dest = fvec2(0);
     int mgc_unit = 0;
     int mgc_time = 0;
+
+    bool dead = 0;
+    int death_timer = 0;
 
     int hits_taken = 0;
     int prev_hits_taken = 0;
@@ -1151,6 +1156,8 @@ struct World
     }
 };
 
+int death_counter = 0;
+int min_y = 9000;
 
 int main(int, char**)
 {
@@ -1188,11 +1195,16 @@ int main(int, char**)
 
     auto Tick = [&]
     {
+        auto &boss = w.b;
+        min_y = min(min_y, w.p.pos.y);
+
         w.p.grazed_this_tick = 0;
 
         auto KillPlayer = [&]
         {
             if (w.p.dead)
+                return;
+            if (boss.dead)
                 return;
             if (w.p.dash_len > 0)
             {
@@ -1206,6 +1218,8 @@ int main(int, char**)
 
             Sounds::death(fvec2(0)).relative();
 
+            death_counter++;
+
             w.p.dead = 1;
             w.whiteness = 1;
             w.p.death_msg_index = random_int(death_messages.size());
@@ -1217,8 +1231,6 @@ int main(int, char**)
                               random_real_range(0.2,2), random_real_range(2,6), random_int_range(30,80));
             }
         };
-
-        auto &boss = w.b;
 
         { // Map
             w.map.Tick(w.cam_pos_i);
@@ -1384,7 +1396,7 @@ int main(int, char**)
             }
 
             { // Light
-                w.AddLight(fvec3(1), w.p.Center(), 0, 0, 0, random_real_range(60,70), 2);
+                w.AddLight(fvec3(0.9), w.p.Center(), 0, 0, 0, random_real_range(60,70), 2);
             }
         }
 
@@ -1591,12 +1603,6 @@ int main(int, char**)
                         constexpr int period = 80;
                         constexpr float overshoot_dist = 120, dash_speed = 5;
 
-                        if (boss.magic_orb_list.empty() && !boss.magic_shield_broken)
-                        {
-                            Sounds::boss_shield_breaks(boss.pos);
-                            boss.magic_shield_broken = 1;
-                        }
-
                         int unit_count = 1 + boss.magic_orb_list.size();
                         int unit = boss.mgc_time / period % unit_count;
                         int time = boss.mgc_time % period;
@@ -1659,6 +1665,47 @@ int main(int, char**)
 
                         boss.mgc_time++;
                     }
+
+                    if (boss.magic_orb_list.empty() && !boss.magic_shield_broken)
+                    {
+                        Sounds::boss_shield_breaks(boss.pos);
+                        boss.magic_shield_broken = 1;
+                    }
+
+                    if (damaged)
+                    {
+                        boss.phase = Boss::Phase::fin;
+                    }
+                }
+                break;
+
+              case Boss::Phase::fin:
+                {
+                    if (boss.phase_time == 1)
+                    {
+                        Sounds::boss_dies(boss.pos);
+                        boss.dead = 1;
+                        boss.magic_shield = 0;
+
+                        for (int i = 0; i < 64; i++)
+                        {
+                            float c = random_real_range(0,1);
+                            fvec3 color(1, 0.6+c*0.4, 0.2+c*0.8);
+                            w.AddParticle(color, 1, 0.5, boss.pos + fvec2(random_real_range(8), random_real_range(8)), random_real_range(f_pi), random_real_range(0.2),
+                                          random_real_range(0.5,8), random_real_range(22,50), random_int_range(120,200));
+                        }
+                    }
+
+                    float l = smoothstep(clamp(min(boss.death_timer*2., 60 - boss.death_timer/5.)/60.));
+
+                    w.AddLight(fvec3(1,0.8,0.3) * 2 * l, boss.pos, 0, 0, 0, random_real_range(160,180), 2);
+
+                    if (boss.death_timer < 500)
+                        w.target_light_rad = 100 + boss.death_timer;
+                    else
+                        w.enable_light = 0;
+
+                    boss.death_timer++;
                 }
                 break;
             }
@@ -1798,7 +1845,7 @@ int main(int, char**)
             }
 
             { // Kill player on body collision
-                if ((boss.pos - w.p.pos).len() < plr_hitbox_rad + boss_hitbox_rad)
+                if (!boss.dead && (boss.pos - w.p.pos).len() < plr_hitbox_rad + boss_hitbox_rad)
                     KillPlayer();
             }
 
@@ -1909,6 +1956,8 @@ int main(int, char**)
                 fvec2 delta = w.p.Center() - w.BossHome();
                 float dist = delta.len();
                 bool out = dist > w.cur_light_rad;
+                if (boss.dead)
+                    out = 0;
                 if (out && w.dark_force_timer < 0.01)
                     KillPlayer();
                 float angle = delta.angle();
@@ -2201,6 +2250,8 @@ int main(int, char**)
 
     auto Render = [&]
     {
+        auto &boss = w.b;
+
         { // Map
             w.map.Render(w.cam_pos_i);
         }
@@ -2222,8 +2273,6 @@ int main(int, char**)
         }
 
         { // Boss
-            auto &boss = w.b;
-
             // Crystals
             for (const auto &it : boss.crystal_list)
             {
@@ -2304,7 +2353,16 @@ int main(int, char**)
 
             { // Body
                 constexpr ivec2 size(64);
-                Quad(iround(boss.pos) - size/2 - w.cam_pos_i, size, Src4(ivec2(0,224), size));
+                constexpr int period = 180;
+                float alpha = 1;
+                if (boss.dead)
+                    alpha = max(0, 1 - boss.death_timer / 60.);
+
+                // Shadow
+                Quad(iround(boss.pos).add_y(10) - size/2 - w.cam_pos_i, size, Src4(ivec2(160,0), size, alpha));
+
+                // Body
+                Quad(iround(boss.pos).add_y(iround(sin(float(metronome.ticks % period) / period * f_pi * 2)*2)) - size/2 - w.cam_pos_i, size, Src4(ivec2(0,224), size, alpha));
             }
         }
 
@@ -2345,12 +2403,58 @@ int main(int, char**)
                 // A funny message
                 ivec2 msg_pos(0, 40);
                 std::string msg = death_messages[w.p.death_msg_index];
-//                for (int i = 0; i < 4; i++)
-//                {
-//                    Text<0>(msg_pos + ivec2(1,0).rot90(i), msg, fvec3(0.75), alpha);
-//                }
+                for (int i = 0; i < 4; i++)
+                {
+                    Text<0>(msg_pos + ivec2(1,0).rot90(i), msg, fvec3(155,173,183)/255, alpha);
+                }
                 Text<0>(msg_pos, msg, fvec3(0), alpha);
             }
+        }
+
+        { // End of game GUI
+            if (boss.dead)
+            {
+                const std::vector<ivec2> offsets = {ivec2(0,-1), ivec2(0, 1), ivec2(1,0), ivec2(-1,0), ivec2(0,0)};
+                for (const auto &offset : offsets)
+                {
+                    fvec3 color = fvec3(155,173,183)/255;
+                    if (offset == ivec2(0))
+                        color = fvec3(0);
+
+                    Text<0>(w.BossHome().sub_y(96-24*0) + offset - w.cam_pos_i, "This is it", color, clamp(boss.death_timer/60. - 5));
+                    Text<0>(w.BossHome().sub_y(96-24*1) + offset - w.cam_pos_i, "Your mission is over", color, clamp(boss.death_timer/60. - 7));
+                    Text<0>(w.BossHome().sub_y(96-24*6) + offset - w.cam_pos_i, "Thanks for playing my game!", color, clamp(boss.death_timer/60. - 12));
+                    Text<0>(w.BossHome().sub_y(96-24*7) + offset - w.cam_pos_i, Str("You died ", death_counter, death_counter == 1 ? " time" : " times"), color, clamp(boss.death_timer/60. - 14));
+                }
+            }
+        }
+
+        { // Tutorial GUI
+            ivec2 spawn = w.map.SpawnTile() * tile_size + tile_size/2;
+
+            auto Message = [&](bool revisitable, int y, int off, std::string text)
+            {
+                float alpha = smoothstep(clamp(2.5 - abs(spawn.y - (revisitable ? w.p.pos.y : min_y) - y) / 24.));
+
+                const std::vector<ivec2> offsets = {ivec2(0,-1), ivec2(0, 1), ivec2(1,0), ivec2(-1,0), ivec2(0,0)};
+                for (const auto &offset : offsets)
+                {
+                    fvec3 color = fvec3(155,173,183)/255;
+                    if (offset == ivec2(0))
+                        color = fvec3(0);
+
+                    Text<0>(spawn.sub_y(y + off) + offset - w.cam_pos_i, text, color, alpha);
+                }
+            };
+
+            Message(1, 0, -4, Str("Use arrows to move\n",
+                             w.button_fire.Name(), " to shoot\n",
+                             w.button_dash.Name(), " to dash"));
+            Message(1, 116, -40, "Dashing makes you invulnerable\n"
+                                 "and allows you to destroy projectiles");
+
+            Message(0, 354, 96, "We found him at last");
+            Message(0, 414, 96, "The last witch-knight...");
         }
 
         { // Screen transition

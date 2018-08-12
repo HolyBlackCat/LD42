@@ -1192,16 +1192,14 @@ int main(int, char**)
         "",
         "Again...",
         "Once again",
-        "Alright, new tactic: git gud",
-        "Rekt",
+        "Got rekt",
         "Oh noes!",
         "Don't give up!",
-        "Try shooting the enemy",
         "You were close",
         "Is it even possible?",
         "Darkness is dangerous!",
-        "How!?",
         "Wanna try again?",
+        "It ain't easy",
     };
 
     mouse.HideCursor();
@@ -2265,6 +2263,8 @@ int main(int, char**)
                     if (w.darkness > 1)
                     {
                         w = saved_world;
+                        w.p.pos.y -= 500;
+                        w.cam_pos.y -= 500;
                     }
                 }
             }

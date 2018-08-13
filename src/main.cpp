@@ -339,10 +339,13 @@ namespace Draw
 
         void Flush()
         {
-            static Graphics::VertexBuffer<Attribs> buffer(size);
-            buffer.SetDataPart(0, array.size(), array.data());
-            buffer.Draw(Graphics::triangles, array.size());
-            array.clear();
+            if (array.size() > 0)
+            {
+                static Graphics::VertexBuffer<Attribs> buffer(size);
+                buffer.SetDataPart(0, array.size(), array.data());
+                buffer.Draw(Graphics::triangles, array.size());
+                array.clear();
+            }
         }
 
         void Push(fvec2 pos, fvec4 color, fvec2 texcoord, fvec3 factors)
@@ -361,10 +364,13 @@ namespace Draw
 
         void Flush()
         {
-            static Graphics::VertexBuffer<Attribs> buffer(size);
-            buffer.SetDataPart(0, array.size(), array.data());
-            buffer.Draw(Graphics::triangles, array.size());
-            array.clear();
+            if (array.size() > 0)
+            {
+                static Graphics::VertexBuffer<Attribs> buffer(size);
+                buffer.SetDataPart(0, array.size(), array.data());
+                buffer.Draw(Graphics::triangles, array.size());
+                array.clear();
+            }
         }
 
         void Push(fvec2 pos, fvec3 color, fvec2 texcoord)
@@ -2548,9 +2554,6 @@ int main(int, char**)
     Draw::Resize();
 
     uint64_t frame_start = Clock::Time();
-
-    // Without this line window resize breaks. Ugh.
-    w.AddLight(fvec3(0), fvec2(0), 0, 0, 0, 0, 1);
 
     while (1)
     {

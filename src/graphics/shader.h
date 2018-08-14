@@ -165,7 +165,7 @@ namespace Graphics::Shader
             }
         }
 
-        template <typename T> static std::vector<std::string> MakeAttributeList()
+        template <typename T> static std::vector<std::string> MakeAttributeList(const Preferences &pref)
         {
             if constexpr (std::is_void_v<T> || std::is_same_v<T, None_t>)
             {
@@ -178,7 +178,7 @@ namespace Graphics::Shader
                 using refl = Refl::Interface<T>;
                 refl::for_each_field([&](auto index)
                 {
-                    ret.push_back(refl::field_name(index.value));
+                    ret.push_back(pref.attribute_prefix + refl::field_name(index.value));
                 });
 
                 return ret;
@@ -273,7 +273,7 @@ namespace Graphics::Shader
         template <typename AttributesT, typename UniformsT>
         Program(std::string name, const Config &cfg, const Preferences &pref, Meta::tag<AttributesT>, UniformsT &uniforms, const std::string &vert_source, const std::string &frag_source)
         : Program(name, cfg, AppendUniformsToSource<UniformsT>(AppendAttributesToSource<AttributesT>(vert_source, cfg, pref), cfg, pref, 1),
-                  AppendUniformsToSource<UniformsT>(frag_source, cfg, pref, 0), MakeAttributeList<AttributesT>())
+                  AppendUniformsToSource<UniformsT>(frag_source, cfg, pref, 0), MakeAttributeList<AttributesT>(pref))
         {
             if constexpr (std::is_void_v<UniformsT> || std::is_same_v<UniformsT, None_t>)
             {

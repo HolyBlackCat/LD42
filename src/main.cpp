@@ -14,7 +14,16 @@ constexpr bool debug_mode = 0;
 bool fullscreen = !debug_mode;
 
 constexpr ivec2 screen_sz = ivec2(1920,1080)/4;
-Interface::Window win("The last witch-knight", screen_sz*2, Interface::Window::windowed, Interface::Window::Settings{}.MinSize(screen_sz));
+Interface::Window win("The last witch-knight", screen_sz*2, Interface::Window::windowed, Interface::Window::Settings{}.MinSize(screen_sz).GlProfile(Interface::Window::Profile::core));
+
+[[maybe_unused]] int x = []
+{
+    GLuint vao;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+    return 0;
+}();
+
 Audio::Context audio;
 Metronome metronome;
 Interface::Mouse mouse;
@@ -2640,6 +2649,10 @@ int main(int, char**)
         Graphics::CheckErrors();
 
         win.SwapBuffers();
+
+        #ifdef GLFL_ENABLE_PROXY
+        return 0;
+        #endif
     }
 
     return 0;

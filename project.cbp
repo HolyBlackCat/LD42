@@ -46,6 +46,14 @@
 					<Add option="-DGLFL_ENABLE_PROXY" />
 				</Compiler>
 			</Target>
+			<Target title="Fast">
+				<Option output="bin/LD42_The_last_witch-knight" prefix_auto="1" extension_auto="1" />
+				<Option working_dir="bin/" />
+				<Option object_output="obj/" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option use_console_runner="0" />
+			</Target>
 		</Build>
 		<Compiler>
 			<Add option="-pedantic-errors" />
